@@ -1,0 +1,110 @@
+{
+  "spark.table": {
+    "type": "source",
+    "parameters": {
+      "tableName": {
+        "type": "string",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "as": {
+    "type": "unary",
+    "parameters": {
+      "alias": {
+        "type": "str",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "table-rename"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "join": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "DataFrame",
+        "required": true
+      },
+      "on": {
+        "type": "Column",
+        "required": true
+      },
+      "how": {
+        "type": "str",
+        "required": true,
+        "default": "inner",
+        "values": ["inner", "outer", "left", "right"]
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "withColumn": {
+    "type": "unary",
+    "parameters": {
+      "colName": {
+        "type": "str",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-add"
+      },
+      "col": {
+        "type": "Column",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "filter": {
+    "type": "unary",
+    "parameters": {
+      "condition": {
+        "type": "Column",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "select": {
+    "type": "unary",
+    "parameters": {
+      "cols": {
+        "type": "Column*",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "orderBy": {
+    "type": "unary",
+    "parameters": {
+      "cols": {
+        "type": "Column*",
+        "required": true
+      },
+      "ascending": {
+        "type": "bool",
+        "required": false,
+        "default": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "distinct": {
+    "type": "unary",
+    "parameters": {},
+    "returns": "DataFrame"
+  },
+  "limit": {
+    "type": "unary",
+    "parameters": {
+      "num": {
+        "type": "int",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  }
+}

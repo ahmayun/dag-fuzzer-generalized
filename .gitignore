@@ -1,0 +1,8 @@
+target/
+tpcds-data/
+spark-warehouse/
+.bsp/
+.idea/
+lib/
+metastore_db/
+dag-gen/

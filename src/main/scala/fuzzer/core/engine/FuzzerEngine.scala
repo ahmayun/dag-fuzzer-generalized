@@ -1,16 +1,17 @@
 package fuzzer.core.engine
 
+import fuzzer.code.SourceCode
 import fuzzer.core.engine.CampaignStats
 import fuzzer.core.exceptions.ImpossibleDFGException
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
-import fuzzer.core.graph.{DAGParser, DFOperator, Graph}
+import fuzzer.core.graph.{DAGParser, DFOperator, Graph, Node}
 import fuzzer.data.tables.Examples.tpcdsTables
 import fuzzer.data.tables.TableMetadata
 import fuzzer.utils.random.Random
 import org.apache.spark.sql.catalyst.rules.Rule.coverage
 import org.yaml.snakeyaml.Yaml
-import play.api.libs.json.JsValue
+import play.api.libs.json.{JsObject, JsValue}
 
 import scala.sys.process._
 import java.io.{File, FileWriter}
@@ -24,6 +25,118 @@ class FuzzerEngine(
                     codeGenerator: CodeGenerator,
                     codeExecutor: CodeExecutor
                   ) {
+
+
+  def generateSingleDAG(): Graph[DFOperator] = {
+    val dagYamlFile = generateYamlFiles(1).head
+    DAGParser.parseYamlFile(dagYamlFile.getAbsolutePath, map => DFOperator.fromMap(map))
+  }
+
+
+
+  def pickRandomSource(opMap: Map[String, Seq[String]]): Option[String] = {
+    opMap.get("source") match {
+      case Some(ops) =>
+        val idx = Random.nextInt(ops.size)
+        ops.lift(idx)
+      case None => None
+    }
+  }
+
+  def pickRandomUnaryOp(opMap: Map[String, Seq[String]], node: Node[DFOperator]): Option[String] = {
+    opMap.get("unary") match {
+      case Some(ops) =>
+        val idx = Random.nextInt(ops.size)
+        ops.lift(idx)
+      case None =>
+        throw new RuntimeException("Abstract DFG construction failed: No unary operators in spec to choose from!")
+    }
+  }
+
+  def pickRandomBinaryOp(opMap: Map[String, Seq[String]]): Option[String] = {
+    opMap.get("binary") match {
+      case Some(ops) =>
+        val idx = Random.nextInt(ops.size)
+        ops.lift(idx)
+      case None => None
+    }
+  }
+
+  def buildOpMap(spec: JsValue): Map[String, Seq[String]] = {
+    spec.as[JsObject].fields.foldLeft(Map.empty[String, Seq[String]]) {
+      case (acc, (name, definition)) =>
+        val opType = (definition \ "type").as[String]
+        acc.updatedWith(opType) {
+          case Some(seq) => Some(seq :+ name)
+          case None => Some(Seq(name))
+        }
+    }
+  }
+
+  private def fillOperators(graph: Graph[DFOperator], spec: JsValue): Graph[DFOperator] = {
+    val opMap = buildOpMap(spec)
+
+    graph.transformNodes { node =>
+      val opOpt = (node.getInDegree, node.getOutDegree) match {
+        //        case (_,0) => pickRandomAction(opMap) // Better to delegate action choice to DFG2Source converter
+        case (0,_) => pickRandomSource(opMap)
+        case (1,_) => pickRandomUnaryOp(opMap, node)
+        case (2,_) => pickRandomBinaryOp(opMap)
+        case (in, _) => throw new ImpossibleDFGException(s"Impossible DFG provided, a node has in-degree=$in")
+      }
+      assert(opOpt.isDefined, s"Couldn't find an operator in the provided spec that fits the node: $node")
+      val Some(op) = opOpt
+      new DFOperator(op, node.value.id)
+    }
+  }
+
+  def initializeStateViews(graph: Graph[DFOperator]): Unit = {
+    for (node <- graph.nodes) {
+      val dfOp = node.value
+
+      val stateCopies: Map[String, TableMetadata] = node.getReachableSources
+        .map(source => source.id -> source.value.state.copy())
+        .toMap
+
+      dfOp.stateView = stateCopies
+    }
+  }
+
+  def constructDFG(dag: Graph[DFOperator], apiSpec: JsValue, tables: List[TableMetadata]): Graph[DFOperator] = {
+
+    val dfg = fillOperators(dag, apiSpec)
+    dfg.computeReachabilityFromSources()
+    val zipped = dfg.getSourceNodes.sortBy(_.value.id).zip(tables)
+    zipped.foreach {
+      case (node, table) =>
+        node.value.state = table
+    }
+
+//    fuzzer.global.State.src2TableMap = zipped.map {
+//      case (node, table) =>
+//        node.id -> table
+//    }.toMap
+
+    initializeStateViews(dfg)
+    dfg
+  }
+
+  def generateSingleProgram(
+                             dag: Graph[DFOperator],
+                             spec: JsValue,
+                             dag2SourceFunc: Graph[DFOperator] => SourceCode,
+                             tables: List[TableMetadata]
+                           ): SourceCode = {
+    val (isInvalid, message) = isInvalidDFG(dag)
+    if (isInvalid) {
+      throw new ImpossibleDFGException(s"Impossible to convert DAG to DFG. $message")
+    }
+
+
+    val dfg = constructDFG(dag, spec, tables)
+    val generatedSource = dfg.generateCode(dag2SourceFunc)
+    generatedSource
+  }
 
   def run(): FuzzerResults = {
     val stats = new CampaignStats()
@@ -48,7 +161,7 @@ class FuzzerEngine(
     try {
       // Main fuzzing loop
       while (!shouldStop) {
-        val dagYamlFiles = generateYamlFiles
+        val dagYamlFiles = generateYamlFiles(config.d)
 
         for (dagYamlFile <- dagYamlFiles if !shouldStop) {
           val dag = DAGParser.parseYamlFile(dagYamlFile.getAbsolutePath, map => DFOperator.fromMap(map))
@@ -79,8 +192,21 @@ class FuzzerEngine(
     outputPath
   }
 
-  def generateDAGFolder: File = {
-    val generateCmd = s"./dag-gen/venv/bin/python dag-gen/run_generator.py -c ${genTempConfigWithNewSeed("dag-gen/sample_config/dfg-config.yaml")}" // dag-gen/sample_config/dfg-config.yaml
+  def updateConfigProperty(configFile: String, propName: String, propValue: Int): Unit = {
+    val yaml = new Yaml()
+    val inputStream = new java.io.FileInputStream(new File(configFile))
+    val data = yaml.load[java.util.Map[String, Object]](inputStream).asScala
+    data.update(propName, Integer.valueOf(propValue))
+    val outputPath = "/tmp/runtime-config.yaml"
+    val writer = new FileWriter(outputPath)
+    yaml.dump(data.asJava, writer)
+    writer.close()
+  }
+
+  def generateDAGFolder(n: Int): File = {
+    val newConfig = genTempConfigWithNewSeed("dag-gen/sample_config/dfg-config.yaml")
+    updateConfigProperty(newConfig, "Number of DAGs", n)
+    val generateCmd = s"./dag-gen/venv/bin/python dag-gen/run_generator.py -c ${newConfig}" // dag-gen/sample_config/dfg-config.yaml
     val exitCode = generateCmd.!
     if (exitCode != 0) {
       println(s"Warning: DAG generation command failed with exit code $exitCode")
@@ -95,9 +221,9 @@ class FuzzerEngine(
     dagFolder
   }
 
-  def generateYamlFiles: Array[File] = {
+  def generateYamlFiles(n: Int): Array[File] = {
 
-    val dagFolder = generateDAGFolder
+    val dagFolder = generateDAGFolder(n)
 
     val yamlFiles = dagFolder
       .listFiles()
@@ -121,7 +247,6 @@ class FuzzerEngine(
 
   }
 
-
   private def processSingleDAG(dag: Graph[DFOperator], stats: CampaignStats, shouldStop: => Boolean): Unit = {
     try {
       val (isInvalid, message) = isInvalidDFG(dag)
@@ -139,7 +264,6 @@ class FuzzerEngine(
 
           try {
             val selectedTables = Random.shuffle(tpcdsTables).take(dag.getSourceNodes.length).toList
-
 
             stats.setGenerated(stats.getGenerated+1)
           } catch {

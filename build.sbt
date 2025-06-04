@@ -19,6 +19,13 @@ dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-databind" % "2.15
 dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-core" % "2.15.2"
 dependencyOverrides += "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2"
 
+// JUnit (core testing library)
+libraryDependencies += "junit" % "junit" % "4.13.2" % Test
+// JUnit Interface to run JUnit tests with SBT
+libraryDependencies += "com.novocode" % "junit-interface" % "0.11" % Test
+// Enable JUnit test framework
+testFrameworks += new TestFramework("com.novocode.junit.JUnitFramework")
+
 
 lazy val root = (project in file("."))
   .settings(

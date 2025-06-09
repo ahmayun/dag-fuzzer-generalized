@@ -2,9 +2,9 @@ package fuzzer.adapters.spark
 
 import fuzzer.code.SourceCode
 import fuzzer.core.global.FuzzerConfig
+import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
 import fuzzer.data.tables.TableMetadata
-import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.utils.spark.tpcds.TPCDSTablesLoader
 import org.apache.spark.sql.SparkSession
 import play.api.libs.json.JsValue

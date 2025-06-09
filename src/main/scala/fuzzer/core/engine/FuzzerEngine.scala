@@ -1,29 +1,27 @@
 package fuzzer.core.engine
 
 import fuzzer.code.SourceCode
-import fuzzer.core.engine.CampaignStats
 import fuzzer.core.exceptions.ImpossibleDFGException
 import fuzzer.core.global.FuzzerConfig
-import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
 import fuzzer.core.graph.{DAGParser, DFOperator, Graph, Node}
+import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
 import fuzzer.data.tables.Examples.tpcdsTables
 import fuzzer.data.tables.TableMetadata
 import fuzzer.utils.random.Random
-import org.apache.spark.sql.catalyst.rules.Rule.coverage
 import org.yaml.snakeyaml.Yaml
 import play.api.libs.json.{JsObject, JsValue}
 
-import scala.sys.process._
 import java.io.{File, FileWriter}
 import scala.jdk.CollectionConverters._
+import scala.sys.process._
 import scala.util.control.Breaks.{break, breakable}
 
 class FuzzerEngine(
-                    config: FuzzerConfig,
-                    spec: JsValue,
-                    dataAdapter: DataAdapter,
-                    codeGenerator: CodeGenerator,
-                    codeExecutor: CodeExecutor
+                    val config: FuzzerConfig,
+                    val spec: JsValue,
+                    val dataAdapter: DataAdapter,
+                    val codeGenerator: CodeGenerator,
+                    val codeExecutor: CodeExecutor
                   ) {
 
 
@@ -112,10 +110,10 @@ class FuzzerEngine(
         node.value.state = table
     }
 
-//    fuzzer.global.State.src2TableMap = zipped.map {
-//      case (node, table) =>
-//        node.id -> table
-//    }.toMap
+    fuzzer.core.global.State.src2TableMap = zipped.map {
+      case (node, table) =>
+        node.id -> table
+    }.toMap
 
     initializeStateViews(dfg)
     dfg

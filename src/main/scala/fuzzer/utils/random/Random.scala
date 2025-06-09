@@ -1,7 +1,5 @@
 package fuzzer.utils.random
 
-import fuzzer.core.global.FuzzerConfig
-
 import scala.util.Random
 
 object Random {

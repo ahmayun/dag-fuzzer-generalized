@@ -1,8 +1,7 @@
 package fuzzer.core.global
 
 import fuzzer.data.tables.TableMetadata
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.{DataFrame, SparkSession}
 
 object State {
 

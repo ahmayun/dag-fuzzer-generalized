@@ -1,6 +1,7 @@
 package fuzzer.utils.json
 
 import play.api.libs.json._
+
 import scala.io.Source
 
 object JsonReader {

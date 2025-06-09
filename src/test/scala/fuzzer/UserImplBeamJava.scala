@@ -9,7 +9,7 @@ import play.api.libs.json._
 
 import scala.collection.mutable
 
-object UserImplSparkScala {
+object UserImplBeamJava {
 
   def constructDFOCall(spec: JsValue, node: Node[DFOperator], in1: String, in2: String): String = {
     val opName = node.value.name
@@ -31,31 +31,10 @@ object UserImplSparkScala {
     // Construct the function call based on operation type
     opType match {
       case "source" => constructSourceCall(node, spec, opName, opType, parameters, args)
-      case "unary" if Array("groupBy").contains(opName) => s"$in1.$opName(${args.mkString(", ")}).${constructAggFollowup(node, spec, opName, opType, parameters, args)}"
-//      case "binary" => s"$in1.$opName(${args.mkString(", ")})"
-//      case "action" => s"$in1.$opName(${args.mkString(", ")})"
+      case "unary" => s"$in1.$opName(${args.mkString(", ")})"
+      case "binary" => s"$in1.$opName(${args.mkString(", ")})"
+      case "action" => s"$in1.$opName(${args.mkString(", ")})"
       case _ => s"$in1.$opName(${args.mkString(", ")})"
-    }
-  }
-
-  private def constructAggFollowup(node: Node[DFOperator], spec: JsValue, opName: String, opType: String, parameters: JsObject, args: List[String]): String = {
-    val (table, col) =  pickRandomColumnFromReachableSources(node)
-    // Choose between sum, avg, count, etc.
-    val aggFuncs = Seq("sum", "avg", "count", "min", "max")
-    val chosenAggFunc = aggFuncs(scala.util.Random.nextInt(aggFuncs.length))
-
-    // Decide whether to do a shortcut (e.g., .sum("col")) or full agg (e.g., .agg(sum("col")))
-    val useShortcut = chosenAggFunc == "sum" || chosenAggFunc == "avg"
-
-    val fullColName = s"${table.identifier}.${col.name}"
-    val aggCol = s"""$chosenAggFunc("$fullColName")"""
-
-    if (useShortcut) {
-      // .groupBy("a").sum("b")
-      s"""$chosenAggFunc("$fullColName")"""
-    } else {
-      // .agg(count("b"))
-      s"""agg($aggCol)"""
     }
   }
 
@@ -413,7 +392,7 @@ object UserImplSparkScala {
     }
   }
 
-  def dag2SparkScala(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
+  def dag2BeamJava(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
     val l = mutable.ListBuffer[String]()
     val variablePrefix = "auto"
     val finalVariableName = "sink"
@@ -432,8 +411,8 @@ object UserImplSparkScala {
     }
     l += s"$finalVariableName.explain(true)"
 
-//     Post-program state updates
-//        l += s"fuzzer.global.State.finalDF = Some(${fuzzer.global.FuzzerConfig.config.finalVariableName})"
+    // Post-program state updates
+    //    l += s"fuzzer.global.State.finalDF = Some(${fuzzer.global.FuzzerConfig.config.finalVariableName})"
 
     SourceCode(src=l.mkString("\n"), ast=null)
   }

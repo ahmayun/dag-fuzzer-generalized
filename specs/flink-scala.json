@@ -1,0 +1,187 @@
+{
+  "tableEnv.from": {
+    "type": "source",
+    "parameters": {
+      "tableName": {
+        "type": "string",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "as": {
+    "type": "unary",
+    "parameters": {
+      "alias": {
+        "type": "string",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "table-rename"
+      }
+    },
+    "returns": "Table"
+  },
+  "select": {
+    "type": "unary",
+    "parameters": {
+      "exprs": {
+        "type": "Expression*",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "filter": {
+    "type": "unary",
+    "parameters": {
+      "condition": {
+        "type": "Expression",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "join": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      },
+      "predicate": {
+        "type": "Expression",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "leftOuterJoin": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      },
+      "predicate": {
+        "type": "Expression",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "rightOuterJoin": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      },
+      "predicate": {
+        "type": "Expression",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "fullOuterJoin": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      },
+      "predicate": {
+        "type": "Expression",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "addColumns": {
+    "type": "unary",
+    "parameters": {
+      "exprs": {
+        "type": "Expression*",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-add"
+      }
+    },
+    "returns": "Table"
+  },
+  "distinct": {
+    "type": "unary",
+    "parameters": {},
+    "returns": "Table"
+  },
+  "orderBy": {
+    "type": "unary",
+    "parameters": {
+      "exprs": {
+        "type": "Expression*",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "fetch": {
+    "type": "unary",
+    "parameters": {
+      "n": {
+        "type": "long",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "limit": {
+    "type": "unary",
+    "parameters": {
+      "n": {
+        "type": "long",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "union": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "unionAll": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "minus": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "intersect": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  }
+}

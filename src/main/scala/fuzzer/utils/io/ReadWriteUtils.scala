@@ -2,6 +2,7 @@ package fuzzer.utils.io
 
 import fuzzer.core.engine.{CampaignStats, FuzzerResults}
 import fuzzer.core.global.FuzzerConfig
+
 import java.io.{File, FileWriter}
 import scala.sys.process._
 

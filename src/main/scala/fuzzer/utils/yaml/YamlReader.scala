@@ -1,6 +1,7 @@
 package fuzzer.utils.yaml
 
 import org.yaml.snakeyaml.Yaml
+
 import java.io.FileInputStream
 import scala.jdk.CollectionConverters._
 

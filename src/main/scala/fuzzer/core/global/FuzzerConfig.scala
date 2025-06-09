@@ -1,9 +1,5 @@
 package fuzzer.core.global
 
-import java.io.File
-import scala.io.Source
-import play.api.libs.json._
-
 case class FuzzerConfig(
                          master: String,
                          targetAPI: String,
@@ -49,7 +45,7 @@ object FuzzerConfig {
       N = 200,
       d = 200,
       p = 10,
-      outDir = "./target/dagfuzz-out",
+      outDir = "./target/dagfuzz-out/spark-scala",
       outExt = ".scala",
       timeLimitSec = 10,
       dagGenDir = "dag-gen/DAGs/DAGs",
@@ -69,16 +65,16 @@ object FuzzerConfig {
     )
   }
 
-  def getBeamConfig: FuzzerConfig = {
+  def getBeamJavaConfig: FuzzerConfig = {
     FuzzerConfig(
       master = "local[*]",
       targetAPI = "beam",
-      specPath ="specs/spark-scala.json",
+      specPath ="specs/beam-java.json",
       exitAfterNSuccesses = true,
       N = 200,
       d = 200,
       p = 10,
-      outDir = "./target/dagfuzz-out",
+      outDir = "./target/dagfuzz-out/beam-java",
       outExt = ".scala",
       timeLimitSec = 10,
       dagGenDir = "dag-gen/DAGs/DAGs",

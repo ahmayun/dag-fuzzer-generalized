@@ -1,12 +1,12 @@
 package fuzzer
 
-import fuzzer.core.engine.{FuzzerEngine, FuzzerResults}
+import fuzzer.core.engine.FuzzerEngine
 import fuzzer.core.global.FuzzerConfig
-import fuzzer.factory.AdapterFactory
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
-import fuzzer.utils.random.Random
+import fuzzer.factory.AdapterFactory
 import fuzzer.utils.io.ReadWriteUtils._
 import fuzzer.utils.json.JsonReader
+import fuzzer.utils.random.Random
 import play.api.libs.json.JsValue
 
 

@@ -21,6 +21,16 @@
     },
     "returns": "DataFrame"
   },
+  "groupBy": {
+    "type": "unary",
+    "parameters": {
+      "cols": {
+        "type": "Column*",
+        "required": true
+      }
+    },
+    "returns": "RelationalGroupedDataset"
+  },
   "join": {
     "type": "binary",
     "parameters": {

@@ -1,6 +1,7 @@
 package fuzzer
 
 import fuzzer.adapters.spark.{SparkCodeExecutor, SparkCodeGenerator, SparkDataAdapter}
+import fuzzer.code.SourceCode
 import fuzzer.core.engine.FuzzerEngine
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
@@ -10,6 +11,9 @@ import fuzzer.utils.json.JsonReader
 import fuzzer.utils.random.Random
 import org.junit.Test
 import play.api.libs.json.JsValue
+import java.io.{BufferedWriter, OutputStreamWriter}
+import java.net.Socket
+import scala.util.{Try, Success, Failure}
 
 class MinimalTests {
 
@@ -35,6 +39,10 @@ class MinimalTests {
       ),
       _metadata = Map("source" -> "inventory")
     )
+  )
+
+  val tpcdsTables: List[TableMetadata] = List (
+
   )
 
   def createEngineFromConfig(config: FuzzerConfig, spec: JsValue): FuzzerEngine = {
@@ -78,17 +86,91 @@ class MinimalTests {
     val dag2SparkScalaFunc = UserImplSparkScala.dag2SparkScala(spec) _
     val sourceCode = engine.generateSingleProgram(dag, spec, dag2SparkScalaFunc, hardcodedTables)
     println(sourceCode)
-//    val result = engine.codeExecutor.execute(sourceCode)
+
+    assert(true)
+  }
+
+  def generateFlinkPythonSourceCode(): SourceCode = {
+    val config = FuzzerConfig.getFlinkPythonConfig
+      .copy(seed = 1234)
+    val spec = JsonReader.readJsonFile(config.specPath)
+    val engine = createEngineFromConfig(config, spec)
+
+    // This may generate an invalid DAG (that's normal
+    // since I have no control over what the DAG module
+    // will generate), change seed if the DAG is invalid.
+    val dag = engine.generateSingleDAG()
+    println(dag)
+
+    val dag2FlinkPythonFunc = UserImplFlinkPython.dag2FlinkPython(spec) _
+    val sourceCode = engine.generateSingleProgram(dag, spec, dag2FlinkPythonFunc, fuzzer.data.tables.Examples.tpcdsTables)
+    sourceCode
+  }
+
+  @Test
+  def testFlinkPython(): Unit = {
+    val sourceCode = generateFlinkPythonSourceCode();
+    println(sourceCode)
     assert(true)
   }
 
   @Test
-  def testBeamJavaGen(): Unit = {
-    assert(true)
-  }
+  def testFlinkPythonServer(): Unit = {
+    val sourceCode = generateFlinkPythonSourceCode()
+    println(sourceCode)
 
-  @Test
-  def testFlinkJava(): Unit = {
-    assert(true)
+    // Server configuration
+    val serverHost = "localhost"
+    val serverPort = 8888
+
+    // Send source code to Python server
+    val result = Try {
+      val socket = new Socket(serverHost, serverPort)
+      val writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream))
+
+      try {
+//        val codeString = List(
+//          """auto0 = table_env.from_path("call_center")""",
+//          """result = auto0.group_by(lit(1)).select(col("cc_call_center_sk").count.alias("total"))""",
+//          """for row in result.execute().collect():""",
+//          """    print(f"TOTAL ROW COUNT: {row[0]}")"""
+//        ).mkString("\n")
+
+        val sourceLines = sourceCode.toString.split("\n")
+        val (first5Lines, rest) = sourceLines.splitAt(6)
+        val addedCode = List(
+//          """print(f"COLS: {auto0.get_schema().get_field_names()}")""",
+//          """print(f"COLS: {auto6.get_schema().get_field_names()}")""",
+//          """
+//            |print("COLUMNS:", auto11.get_schema().get_field_names())
+//            |
+//            |result = auto11.execute()
+//            |for i, row in enumerate(result.collect()):
+//            |    if i >= 10:  # limit to first 10 rows
+//            |        break
+//            |    print(row)""".stripMargin
+        )
+        val codeString = (first5Lines ++ addedCode ++ rest).mkString("\n")
+
+        // Send length first, then the code
+        writer.write(s"${codeString.length}\n")
+        writer.write(codeString)
+        writer.newLine()
+        writer.flush()
+
+        println(s"Successfully sent source code (${codeString.length} chars) to server at $serverHost:$serverPort")
+        true
+      } finally {
+        writer.close()
+        socket.close()
+      }
+    }
+
+    result match {
+      case Success(_) => assert(true)
+      case Failure(exception) =>
+        println(s"Failed to send source code: ${exception.getMessage}")
+        assert(false, s"Connection failed: ${exception.getMessage}")
+    }
   }
 }

@@ -6,3 +6,8 @@ spark-warehouse/
 lib/
 metastore_db/
 dag-gen/
+derby.log
+parquet-to-csv.scala
+server-log/
+tpcds-csv/
+venv/

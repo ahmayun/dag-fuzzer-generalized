@@ -1,3 +1,5 @@
+package misc.frameworks.flink
+
 //package misc.frameworks.flink
 //
 //object BasicExample {

@@ -9,7 +9,7 @@ import play.api.libs.json._
 
 import scala.collection.mutable
 
-object UserImplBeamJava {
+object UserImplFlinkPython {
 
   def constructDFOCall(spec: JsValue, node: Node[DFOperator], in1: String, in2: String): String = {
     val opName = node.value.name
@@ -31,19 +31,36 @@ object UserImplBeamJava {
     // Construct the function call based on operation type
     opType match {
       case "source" => constructSourceCall(node, spec, opName, opType, parameters, args)
-      case "unary" => s"$in1.$opName(${args.mkString(", ")})"
-      case "binary" => s"$in1.$opName(${args.mkString(", ")})"
-      case "action" => s"$in1.$opName(${args.mkString(", ")})"
+      case "unary" if opName == "group_by" => s"$in1.$opName(${args.mkString(", ")}).${constructAggFollowup(node, spec, opName, opType, parameters, args)}"
       case _ => s"$in1.$opName(${args.mkString(", ")})"
     }
   }
 
+  private def constructAggFollowup(node: Node[DFOperator], spec: JsValue, opName: String, opType: String, parameters: JsObject, args: List[String]): String = {
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    // Choose between sum, avg, count, etc.
+    val aggFuncs = Seq("sum", "avg", "count", "min", "max")
+    val chosenAggFunc = aggFuncs(scala.util.Random.nextInt(aggFuncs.length))
+
+    val fullColName = constructFullColumnName(table, col)
+
+    filterColumns(fullColName, node)
+    propagateState(node)
+    // PyFlink uses different syntax for aggregations
+    chosenAggFunc match {
+      case "sum" => s"select(col('$fullColName').sum.alias('$fullColName'))"
+      case "avg" => s"select(col('$fullColName').avg.alias('$fullColName'))"
+      case "count" => s"select(col('$fullColName').count.alias('$fullColName'))"
+      case "min" => s"select(col('$fullColName').min.alias('$fullColName'))"
+      case "max" => s"select(col('$fullColName').max.alias('$fullColName'))"
+    }
+
+  }
+
   private def constructSourceCall(node: Node[DFOperator], spec: JsValue, opName: String, opType: String, parameters: JsObject, args: List[String]): String = {
-    val tpcdsTablesPath = fuzzer.core.global.State.config.get.localTpcdsPath
     val tableName = fuzzer.core.global.State.src2TableMap(node.id).identifier
     opName match {
-      case "spark.table" => s"""$opName("tpcds.$tableName").as("$tableName")"""
-      case "spark.read.parquet" => s"""$opName("$tpcdsTablesPath/$tableName").as("$tableName")"""
+      case "table_env.from_path" => s"""table_env.from_path("$tableName")"""
       case _ => s"$opName(${args.mkString(", ")})"
     }
   }
@@ -57,8 +74,8 @@ object UserImplBeamJava {
       val required = (param \ "required").as[Boolean]
       val hasDefault = (param \ "default").isDefined
 
-      // For binary operations with DataFrame parameter, use in2
-      if (paramName == "other" && paramType == "DataFrame" && opType == "binary") {
+      // For binary operations with Table parameter, use in2
+      if (paramName == "other" && paramType == "Table" && opType == "binary") {
         Some(in2)
       } else if (required || (!hasDefault && Random.nextBoolean())) {
         // Generate a value for required parameters or randomly for optional ones
@@ -88,29 +105,9 @@ object UserImplBeamJava {
       t.columns.map(c => (t, c))
     }
     tablesColPairs
-    //    if (preferUnique) {
-    //      val sourcesToPickFrom = node.getReachableFromOnce
-    ////      println("Preferring Unique")
-    ////      println(s"${sourcesToPickFrom.size}/${node.getReachableSources.size}")
-    //      if (sourcesToPickFrom.isEmpty) {
-    //        tablesColPairs
-    //      } else {
-    //        val sourceTableNames = sourcesToPickFrom.map(_.value.state.originalIdentifier)
-    ////        println(s"Tables to pick from ${sourceTableNames}")
-    //        val fil = tablesColPairs.filter { case (t, _) =>
-    //          val origName = t.originalIdentifier
-    ////          println(s"Checking if $origName in $sourceTableNames")
-    //          sourceTableNames.contains(origName)
-    //        }
-    //        println(s"filtered from ${tablesColPairs.size} => ${fil.size} for node ${node.value.name}")
-    //        if(fil.nonEmpty) fil else tablesColPairs
-    //      }
-    //    } else {
-    //      tablesColPairs
-    //    }
   }
 
-  def pickRandomColumnFromReachableSources(node: Node[DFOperator], preferUnique: Boolean=true): (TableMetadata, ColumnMetadata) = {
+  def pickRandomColumnFromReachableSources(node: Node[DFOperator], preferUnique: Boolean = true): (TableMetadata, ColumnMetadata) = {
     val tablesColPairs = getAllColumns(node, preferUnique).filter {
       case (_, col) =>
         col.metadata.get("gen-iteration") match {
@@ -126,28 +123,36 @@ object UserImplBeamJava {
 
   def renameTables(newValue: String, node: Node[DFOperator]): Unit = {
     val dfOp = node.value
-    //    println(s"====== RENAMING TABLE VIEW FOR ${node.id} (${node.value.name}) ===========")
 
     // Rename each table metadata entry in the stateView
     val renamedStateView: Map[String, TableMetadata] = dfOp.stateView.map {
       case (id, tableMeta) =>
         val renamed = tableMeta.copy() // get a deep copy
-        //        println(s"\t => At $id (${tableMeta.identifier} => $newValue)")
         renamed.setIdentifier(newValue) // modify as needed
         id -> renamed
     }
 
-    // Update this node’s stateView with renamed copies
+    // Update this node's stateView with renamed copies
     dfOp.stateView = renamedStateView
   }
 
   def addColumn(value: String, node: Node[DFOperator]): Unit = {
     node.value.stateView = node.value.stateView + ("added" -> TableMetadata(
       _identifier = "",
-      _columns = Seq(ColumnMetadata(name=value, dataType = DataType.generateRandom, metadata = Map("source" -> "runtime", "gen-iteration" -> fuzzer.core.global.State.iteration.toString))),
+      _columns = Seq(ColumnMetadata(name = value, dataType = DataType.generateRandom, metadata = Map("source" -> "runtime", "gen-iteration" -> fuzzer.core.global.State.iteration.toString))),
       _metadata = Map("source" -> "runtime", "gen-iteration" -> fuzzer.core.global.State.iteration.toString)
     ))
   }
+
+  def filterColumns(paramVal: String, node: Node[DFOperator]): Unit = {
+    node.value.stateView = node.value.stateView.map {
+      case (tname, tmd) =>
+        (tname -> tmd.filterColumns(Array(paramVal)))
+    }
+
+//    println(s"UPDATED THE STATEVIEW")
+  }
+
   def updateSourceState(
                          node: Node[DFOperator],
                          param: JsLookupResult,
@@ -159,10 +164,9 @@ object UserImplBeamJava {
     effect match {
       case "table-rename" => renameTables(paramVal, node)
       case "column-add" => addColumn(paramVal, node)
+      case "column-filter" => filterColumns(paramVal, node)
     }
   }
-
-
 
   def propagateState(startNode: Node[DFOperator]): Unit = {
     val visited = mutable.Set[String]()
@@ -216,8 +220,9 @@ object UserImplBeamJava {
   }
 
   def constructFullColumnName(table: TableMetadata, col: ColumnMetadata): String = {
-    val prefix = if(table.identifier != null && table.identifier.nonEmpty) s"${table.identifier}." else ""
-    s"$prefix${col.name}"
+    val prefix = if (table.identifier != null && table.identifier.nonEmpty) s"${table.identifier}." else ""
+//    s"$prefix${col.name}"
+    s"${col.name}" // apparently in flink, you can't use the table prefix
   }
 
   def pickTwoColumns(stateView: Map[String, TableMetadata]): Option[((TableMetadata, ColumnMetadata), (TableMetadata, ColumnMetadata))] = {
@@ -234,11 +239,10 @@ object UserImplBeamJava {
       .mapValues(_.map(_._2))
       .toMap
 
-
     // Step 2: Filter to only those datatypes which have columns from at least 2 distinct tables
     val viableTypes: Seq[(DataType, Seq[(TableMetadata, ColumnMetadata)])] = columnsByType.toSeq
       .map { case (dt, cols) =>
-        val tableGroups = cols.groupBy(_._1)  // group by TableMetadata
+        val tableGroups = cols.groupBy(_._1) // group by TableMetadata
         (dt, tableGroups)
       }
       .filter { case (_, tableGroups) => tableGroups.size >= 2 }
@@ -248,7 +252,6 @@ object UserImplBeamJava {
 
     // Step 3: Randomly pick a datatype from viable options
     if (viableTypes.isEmpty) {
-      //      throw new RuntimeException("No two columns of the same type from different tables found")
       return None
     }
 
@@ -280,9 +283,10 @@ object UserImplBeamJava {
         val ((table1, col1), (table2, col2)) = pair
         val fullColName1 = constructFullColumnName(table1, col1)
         val fullColName2 = constructFullColumnName(table2, col2)
-        val colExpr1 = s"""col("$fullColName1")"""
-        val colExpr2 = s"""col("$fullColName2")"""
-        val crossTableExpr = s"$colExpr1 === $colExpr2"
+        // PyFlink uses different syntax for column expressions
+        val colExpr1 = s"col('$fullColName1')"
+        val colExpr2 = s"col('$fullColName2')"
+        val crossTableExpr = s"$colExpr1 == $colExpr2"
         Some(crossTableExpr)
       case None => None
     }
@@ -294,13 +298,18 @@ object UserImplBeamJava {
                       paramName: String,
                       paramType: String
                     ): String = {
+
+    val isStateAltering: Boolean = (param \ "state-altering").asOpt[Boolean].getOrElse(false)
+
     val (table, col) = pickRandomColumnFromReachableSources(node)
     val fullColName = constructFullColumnName(table, col)
-    if (Random.nextFloat() < fuzzer.core.global.State.config.get.probUDFInsert) {
-      s"""preloadedUDF(col("$fullColName"))"""
-    } else {
-      s"""col("$fullColName")"""
+
+    if (isStateAltering) {
+      // Generate random string (e.g. for creating a new column)
+      updateSourceState(node, param, paramName, paramType, fullColName)
+      propagateState(node)
     }
+    s"col('$fullColName')"
   }
 
   def generateSingleColumnExpression(
@@ -314,18 +323,29 @@ object UserImplBeamJava {
     val prob = config.probUDFInsert
     val (table, col) = pickRandomColumnFromReachableSources(node)
     val fullColName = constructFullColumnName(table, col)
-    val colExpr = s"""col("$fullColName")"""
+    val colExpr = s"col('$fullColName')"
 
     val op = config.logicalOperatorSet.toVector(Random.nextInt(config.logicalOperatorSet.size))
 
     val intValue = config.randIntMin + Random.nextInt(config.randIntMax - config.randIntMin + 1)
     val floatValue = config.randFloatMin + Random.nextFloat() * (config.randFloatMax - config.randFloatMin)
 
-    val intExpr = s"$colExpr $op $intValue"
-    val floatExpr = s"$colExpr $op $floatValue"
-    val stringExpr = s"length($colExpr) $op 5"
+    // PyFlink uses different operator syntax
+    val pyFlinkOp = op match {
+      case "==" => "=="
+      case "!=" => "!="
+      case ">" => ">"
+      case "<" => "<"
+      case ">=" => ">="
+      case "<=" => "<="
+      case _ => "=="
+    }
+
+    val intExpr = s"$colExpr $pyFlinkOp $intValue"
+    val floatExpr = s"$colExpr $pyFlinkOp $floatValue"
+    val stringExpr = s"$colExpr.char_length $pyFlinkOp 5"
     val boolExpr = s"!$colExpr"
-    val udfExpr = s"preloadedUDF($colExpr)"
+    val udfExpr = s"preloaded_udf($colExpr)"
 
     if (Random.nextFloat() < prob && !node.value.name.contains("filter")) {
       udfExpr
@@ -371,50 +391,68 @@ object UserImplBeamJava {
       case Some(values) if values.nonEmpty =>
         val randomValue = values(Random.nextInt(values.length))
         randomValue match {
-          case JsString(str) => s""""$str"""" // Add quotes for strings
-          case other => other.toString       // Leave numbers, bools, etc. as-is
+          case JsString(str) => s"'$str'" // Use single quotes for Python strings
+          case other => other.toString // Leave numbers, bools, etc. as-is
         }
 
       // Generate values if spec doesn't provide fixed options
       case _ =>
         paramType match {
           case "int" => Random.nextInt(100).toString
-          case "bool" => Random.nextBoolean().toString
-          case "str" => s""""${generateOrPickString(node, param, paramName, paramType)}""""
-          case "Column" => generateColumnExpression(node, param, paramName, paramType)
+          case "bool" => if (Random.nextBoolean()) "True" else "False" // Python boolean literals
+          case "str" | "string" => s"'${generateOrPickString(node, param, paramName, paramType)}'"
+          case "Expression" => generateColumnExpression(node, param, paramName, paramType)
           case "List[str]" =>
-            s"List(${(0 until maxListLength).map(_ => generateOrPickString(node, param, paramName, paramType)).mkString(",")})"
-          case "Column*" =>
-            s"${(0 until maxListLength).map(_ => pickColumnExpr(node, param, paramName, paramType)).mkString(",")}"
-          case "list" => s"""List("${Random.alphanumeric.take(5).mkString}")"""
-          case _ => s""""${Random.alphanumeric.take(8).mkString}""""
+            s"[${(0 until Random.nextInt(maxListLength)+1).map(_ => s"'${generateOrPickString(node, param, paramName, paramType)}'").mkString(", ")}]"
+          case "Expression*" =>
+            node.value.name match {
+              case "add_columns" => """lit("hello")"""
+              case _ => s"${(0 until Random.nextInt(maxListLength)+1).map(_ => pickColumnExpr(node, param, paramName, paramType)).mkString(", ")}"
+            }
+          case "list" => s"['${Random.alphanumeric.take(5).mkString}']"
+          case _ => s"'${Random.alphanumeric.take(8).mkString}'"
         }
     }
   }
 
-  def dag2BeamJava(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
+  def dag2FlinkPython(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
     val l = mutable.ListBuffer[String]()
     val variablePrefix = "auto"
     val finalVariableName = "sink"
 
+    // Add PyFlink imports
+    l += "from pyflink.table import *"
+    l += "from pyflink.table.expressions import *"
+    l += ""
 
     graph.traverseTopological { node =>
       node.value.varName = s"$variablePrefix${node.id}"
+      val svBefore = s"${node.value.stateView}"
 
       val call = node.getInDegree match {
         case 0 => constructDFOCall(spec, node, null, null)
         case 1 => constructDFOCall(spec, node, node.parents.head.value.varName, null)
         case 2 => constructDFOCall(spec, node, node.parents.head.value.varName, node.parents.last.value.varName)
       }
-      val lhs = if(node.isSink) s"val $finalVariableName = " else s"val ${node.value.varName} = "
-      l += s"$lhs$call"
+      val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
+      val svAfter = s"${node.value.stateView}"
+
+//      val line =
+//        s"""
+//          |# STATE VIEW BEFORE: $svBefore
+//          |$lhs$call
+//          |# STATE VIEW AFTER: $svAfter
+//          |""".stripMargin
+      val line = s"$lhs$call"
+
+      l += line
+
     }
-    l += s"$finalVariableName.explain(true)"
 
-    // Post-program state updates
-    //    l += s"fuzzer.global.State.finalDF = Some(${fuzzer.global.FuzzerConfig.config.finalVariableName})"
+    // PyFlink equivalent of explain
+    l += s"$finalVariableName.explain()"
 
-    SourceCode(src=l.mkString("\n"), ast=null)
+    SourceCode(src = l.mkString("\n"), ast = null)
   }
 
 }

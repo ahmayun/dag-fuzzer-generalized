@@ -65,16 +65,16 @@ object FuzzerConfig {
     )
   }
 
-  def getBeamJavaConfig: FuzzerConfig = {
+  def getFlinkPythonConfig: FuzzerConfig = {
     FuzzerConfig(
       master = "local[*]",
-      targetAPI = "beam",
-      specPath ="specs/beam-java.json",
+      targetAPI = "flink-python",
+      specPath ="specs/flink-python.json",
       exitAfterNSuccesses = true,
       N = 200,
       d = 200,
       p = 10,
-      outDir = "./target/dagfuzz-out/beam-java",
+      outDir = "./target/dagfuzz-out/flink-python",
       outExt = ".scala",
       timeLimitSec = 10,
       dagGenDir = "dag-gen/DAGs/DAGs",
@@ -84,8 +84,8 @@ object FuzzerConfig {
       updateLiveStatsAfter = 10,
       intermediateVarPrefix = "auto",
       finalVariableName = "sink",
-      probUDFInsert = 0.1,
-      maxListLength = 2,
+      probUDFInsert = 0,
+      maxListLength = 1,
       randIntMin = -50,
       randIntMax = 50,
       randFloatMin = -50.0,

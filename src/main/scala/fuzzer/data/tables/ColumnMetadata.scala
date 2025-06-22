@@ -9,4 +9,8 @@ case class ColumnMetadata(
                            isKey: Boolean = false,
                            defaultValue: Option[Any] = None,
                            metadata: Map[String, String] = Map.empty // e.g. comments, tags, etc.
-                         )
+                         ) {
+  override def toString: String = {
+    name
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "table_env.from_path": {
+    "type": "source",
+    "parameters": {
+      "table_name": {
+        "type": "string",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "alias": {
+    "type": "unary",
+    "parameters": {
+      "alias": {
+        "type": "str",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "table-rename"
+      }
+    },
+    "returns": "Table"
+  },
+  "group_by": {
+    "type": "unary",
+    "parameters": {
+      "cols": {
+        "type": "Expression*",
+        "required": true
+      }
+    },
+    "returns": "GroupedTable"
+  },
+  "join": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "Table",
+        "required": true
+      },
+      "on": {
+        "type": "Expression",
+        "required": true
+      },
+      "how": {
+        "type": "str",
+        "required": false,
+        "default": "inner",
+        "values": ["inner", "left", "right", "full"]
+      }
+    },
+    "returns": "Table"
+  },
+  "add_columns": {
+    "type": "unary",
+    "parameters": {
+      "expressions": {
+        "type": "Expression*",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-add"
+      }
+    },
+    "returns": "Table"
+  },
+  "filter": {
+    "type": "unary",
+    "parameters": {
+      "condition": {
+        "type": "Expression",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "select": {
+    "type": "unary",
+    "parameters": {
+      "cols": {
+        "type": "Expression*",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-filter"
+      }
+    },
+    "returns": "Table"
+  },
+  "order_by": {
+    "type": "unary",
+    "parameters": {
+      "cols": {
+        "type": "Expression*",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  },
+  "distinct": {
+    "type": "unary",
+    "parameters": {},
+    "returns": "Table"
+  },
+  "limit": {
+    "type": "unary",
+    "parameters": {
+      "num": {
+        "type": "int",
+        "required": true
+      }
+    },
+    "returns": "Table"
+  }
+}

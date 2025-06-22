@@ -30,4 +30,20 @@ case class TableMetadata(
     n
   }
 
+  override def toString: String = {
+    s"""Table[id="$identifier,cols=[${columns.mkString(",")}]"]"""
+  }
+
+  def filterColumns(cols: Array[String]): TableMetadata = {
+    val n = TableMetadata(identifier, columns.filter {
+      colMd =>
+//        println(s"Checking if ${colMd.name} in ${cols.mkString(",")}")
+        cols.contains(colMd.name)
+    }, metadata)
+
+//    println(s"FINAL COLS AFTER FILTER ${n.columns.mkString(",")}")
+    n.setOriginalIdentifier(this.originalIdentifier)
+    n
+  }
+
 }

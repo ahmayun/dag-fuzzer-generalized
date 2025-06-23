@@ -39,7 +39,7 @@ object MainFuzzer {
     println(s"Target API: ${config.targetAPI}")
 
     // Create API-specific components using factory
-    val (dataAdapter, codeGenerator, codeExecutor) = AdapterFactory.createComponents(config)
+    val (dataAdapter, codeGenerator, codeExecutor) = AdapterFactory.createComponents(config, null)
 
     // Create and run the fuzzer engine
     val startTime = System.currentTimeMillis()

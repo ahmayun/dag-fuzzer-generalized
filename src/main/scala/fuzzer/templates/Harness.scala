@@ -9,10 +9,10 @@ object Harness {
     """
       |import org.apache.spark.sql.SparkSession
       |import org.apache.spark.sql.functions._
-      |import fuzzer.global.State.sparkOption
-      |import utils.spark.optimizer.ToolKit.withoutOptimized
+      |import fuzzer.core.global.State.sparkOption
+      |import fuzzer.utils.spark.optimizer.ToolKit.withoutOptimized
       |import fuzzer.templates.ComplexObject
-      |import fuzzer.exceptions._
+      |import fuzzer.core.exceptions._
       |""".stripMargin
 
   val preloadedUDFDefinition =
@@ -35,7 +35,7 @@ object Harness {
       |
       |$insertionMark
       |
-      |    fuzzer.global.State.optDF = Some(sink)
+      |    fuzzer.core.global.State.optDF = Some(sink)
       |  }
       |}
       |
@@ -43,11 +43,11 @@ object Harness {
       |   Optimized.main(Array())
       |} catch {
       | case e =>
-      |    fuzzer.global.State.optRunException = Some(e)
+      |    fuzzer.core.global.State.optRunException = Some(e)
       |}
       |
-      |if (fuzzer.global.State.optRunException.isEmpty)
-      |   fuzzer.global.State.optRunException = Some(new Success("Success"))
+      |if (fuzzer.core.global.State.optRunException.isEmpty)
+      |   fuzzer.core.global.State.optRunException = Some(new Success("Success"))
       |/*
       |$resultMark
       |*/
@@ -74,7 +74,7 @@ object Harness {
       |    withoutOptimized(excludedRules) {
       |$insertionMark
       |
-      |    fuzzer.global.State.unOptDF = Some(sink)
+      |    fuzzer.core.global.State.unOptDF = Some(sink)
       |    }
       |  }
       |}
@@ -84,11 +84,11 @@ object Harness {
       |   UnOptimized.main(Array())
       |} catch {
       | case e =>
-      |    fuzzer.global.State.unOptRunException = Some(e)
+      |    fuzzer.core.global.State.unOptRunException = Some(e)
       |}
       |
-      |if (fuzzer.global.State.unOptRunException.isEmpty)
-      |   fuzzer.global.State.unOptRunException = Some(new Success("Success"))
+      |if (fuzzer.core.global.State.unOptRunException.isEmpty)
+      |   fuzzer.core.global.State.unOptRunException = Some(new Success("Success"))
       |
       |/*
       |$resultMark

@@ -100,7 +100,7 @@ class FuzzerEngine(
     }
   }
 
-  def constructDFG(dag: Graph[DFOperator], apiSpec: JsValue, tables: List[TableMetadata]): Graph[DFOperator] = {
+  def constructDFG(dag: Graph[DFOperator], apiSpec: JsValue, tables: Seq[TableMetadata]): Graph[DFOperator] = {
 
     val dfg = fillOperators(dag, apiSpec)
     dfg.computeReachabilityFromSources()
@@ -123,7 +123,7 @@ class FuzzerEngine(
                              dag: Graph[DFOperator],
                              spec: JsValue,
                              dag2SourceFunc: Graph[DFOperator] => SourceCode,
-                             tables: List[TableMetadata]
+                             tables: Seq[TableMetadata]
                            ): SourceCode = {
     val (isInvalid, message) = isInvalidDFG(dag)
     if (isInvalid) {
@@ -165,7 +165,7 @@ class FuzzerEngine(
           val dag = DAGParser.parseYamlFile(dagYamlFile.getAbsolutePath, map => DFOperator.fromMap(map))
 
           println(s"Processing ${dagYamlFile.getName}")
-//          processSingleDAG(dag, stats, shouldStop)
+          processSingleDAG(dag, stats, shouldStop)
         }
       }
 
@@ -261,7 +261,9 @@ class FuzzerEngine(
           stats.setIteration(fuzzer.core.global.State.iteration)
 
           try {
-            val selectedTables = Random.shuffle(tpcdsTables).take(dag.getSourceNodes.length).toList
+            val selectedTables = Random.shuffle(dataAdapter.getTables).take(dag.getSourceNodes.length).toList
+            val sourceCode = generateSingleProgram(dag, spec, codeGenerator.getDag2CodeFunc, selectedTables)
+            val results = codeExecutor.execute(sourceCode)
 
             stats.setGenerated(stats.getGenerated+1)
           } catch {

@@ -1,19 +1,23 @@
 package fuzzer
 
+import fuzzer.MainFuzzer.createFuzzerEngine
 import fuzzer.adapters.spark.{SparkCodeExecutor, SparkCodeGenerator, SparkDataAdapter}
 import fuzzer.code.SourceCode
 import fuzzer.core.engine.FuzzerEngine
 import fuzzer.core.global.FuzzerConfig
+import fuzzer.core.graph.{DFOperator, Graph}
 import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
 import fuzzer.data.types.IntegerType
-import fuzzer.utils.io.ReadWriteUtils.{createDir, deleteDir}
+import fuzzer.factory.AdapterFactory
+import fuzzer.utils.io.ReadWriteUtils.{createDir, deleteDir, prettyPrintStats, saveResultsToFile}
 import fuzzer.utils.json.JsonReader
 import fuzzer.utils.random.Random
 import org.junit.Test
 import play.api.libs.json.JsValue
+
 import java.io.{BufferedWriter, OutputStreamWriter}
 import java.net.Socket
-import scala.util.{Try, Success, Failure}
+import scala.util.{Failure, Success, Try}
 
 class MinimalTests {
 
@@ -45,20 +49,13 @@ class MinimalTests {
 
   )
 
-  def createEngineFromConfig(config: FuzzerConfig, spec: JsValue): FuzzerEngine = {
-
-    fuzzer.core.global.State.config = Some(config)
-    Random.setSeed(config.seed)
-
-    // Clean output directories
-    deleteDir(config.dagGenDir)
-    deleteDir(config.outDir)
-    createDir(config.outDir)
+  def createEngineFromConfig(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Graph[DFOperator] => SourceCode): FuzzerEngine = {
 
     // Create API-specific components using factory
-    val dataAdapter = new SparkDataAdapter(config)
-    val codeGenerator = new SparkCodeGenerator(config, spec)
-    val codeExecutor = new SparkCodeExecutor(config, spec)
+//    val dataAdapter = new SparkDataAdapter(config)
+//    val codeGenerator = new SparkCodeGenerator(config, spec)
+//    val codeExecutor = new SparkCodeExecutor(config, spec)
+    val (dataAdapter, codeGenerator, codeExecutor) = AdapterFactory.createComponents(config, dag2CodeFunc)
 
     val engine = new FuzzerEngine(
       config = config,
@@ -70,12 +67,14 @@ class MinimalTests {
 
     engine
   }
+
   @Test
   def testSparkScalaGen(): Unit = {
     val config = FuzzerConfig.getSparkScalaConfig
       .copy(seed = 1234)
     val spec = JsonReader.readJsonFile(config.specPath)
-    val engine = createEngineFromConfig(config, spec)
+    val dag2SparkScalaFunc = UserImplSparkScala.dag2SparkScala(spec) _
+    val engine = createEngineFromConfig(config, spec, dag2SparkScalaFunc)
 
     // This may generate an invalid DAG (that's normal
     // since I have no control over what the DAG module
@@ -83,7 +82,6 @@ class MinimalTests {
     val dag = engine.generateSingleDAG()
     println(dag)
 
-    val dag2SparkScalaFunc = UserImplSparkScala.dag2SparkScala(spec) _
     val sourceCode = engine.generateSingleProgram(dag, spec, dag2SparkScalaFunc, hardcodedTables)
     println(sourceCode)
 
@@ -94,7 +92,8 @@ class MinimalTests {
     val config = FuzzerConfig.getFlinkPythonConfig
       .copy(seed = 1234)
     val spec = JsonReader.readJsonFile(config.specPath)
-    val engine = createEngineFromConfig(config, spec)
+    val dag2FlinkPythonFunc = UserImplFlinkPython.dag2FlinkPython(spec) _
+    val engine = createEngineFromConfig(config, spec, dag2FlinkPythonFunc)
 
     // This may generate an invalid DAG (that's normal
     // since I have no control over what the DAG module
@@ -102,7 +101,6 @@ class MinimalTests {
     val dag = engine.generateSingleDAG()
     println(dag)
 
-    val dag2FlinkPythonFunc = UserImplFlinkPython.dag2FlinkPython(spec) _
     val sourceCode = engine.generateSingleProgram(dag, spec, dag2FlinkPythonFunc, fuzzer.data.tables.Examples.tpcdsTables)
     sourceCode
   }
@@ -172,5 +170,39 @@ class MinimalTests {
         println(s"Failed to send source code: ${exception.getMessage}")
         assert(false, s"Connection failed: ${exception.getMessage}")
     }
+  }
+
+  @Test
+  def testSparkScalaFuzzing(): Unit = {
+
+    val config = FuzzerConfig.getSparkScalaConfig
+      .copy(seed = 1234)
+    val spec = JsonReader.readJsonFile(config.specPath)
+
+    val dag2SparkScalaFunc = UserImplSparkScala.dag2SparkScala(spec) _
+    val engine = createEngineFromConfig(config, spec, dag2SparkScalaFunc)
+
+    fuzzer.core.global.State.config = Some(config)
+    Random.setSeed(config.seed)
+
+    deleteDir(config.dagGenDir)
+    deleteDir(config.outDir)
+    createDir(config.outDir)
+
+    println(s"Starting fuzzing campaign with seed: ${config.seed}")
+    println(s"Target API: ${config.targetAPI}")
+
+    val startTime = System.currentTimeMillis()
+
+    val results = engine.run()
+
+    val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
+
+    // Print final results
+    println(s"Fuzzing campaign completed in $elapsedSeconds seconds")
+    println(prettyPrintStats(results.stats))
+
+    // Save detailed results to file
+    saveResultsToFile(config, results, elapsedSeconds)
   }
 }

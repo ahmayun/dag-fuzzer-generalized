@@ -1,10 +1,9 @@
 package fuzzer.core.interfaces
 
 import fuzzer.code.SourceCode
-import fuzzer.core.graph.{DFOperator, Graph, Node}
+import fuzzer.core.graph.{DFOperator, Graph}
+
 
 trait CodeGenerator {
-  def generateCode(graph: Graph[DFOperator]): SourceCode
-  def constructOperatorCall(node: Node[DFOperator], inputs: Seq[String]): String
-  def supportedOperators: Set[String]
+  def getDag2CodeFunc: Graph[DFOperator] => SourceCode
 }

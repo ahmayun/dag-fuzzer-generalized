@@ -42,7 +42,7 @@ object FuzzerConfig {
       targetAPI = "spark-scala",
       specPath ="specs/spark-scala.json",
       exitAfterNSuccesses = true,
-      N = 200,
+      N = 10,
       d = 200,
       p = 10,
       outDir = "./target/dagfuzz-out/spark-scala",

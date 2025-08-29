@@ -1,12 +1,12 @@
 package fuzzer.core.engine
 
 import fuzzer.code.SourceCode
-import fuzzer.core.exceptions.ImpossibleDFGException
+import fuzzer.core.exceptions.{ImpossibleDFGException, MismatchException, Success}
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DAGParser, DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
-import fuzzer.data.tables.Examples.tpcdsTables
 import fuzzer.data.tables.TableMetadata
+import fuzzer.utils.io.ReadWriteUtils.{prettyPrintStats, writeLiveStats}
 import fuzzer.utils.random.Random
 import org.yaml.snakeyaml.Yaml
 import play.api.libs.json.{JsObject, JsValue}
@@ -141,7 +141,7 @@ class FuzzerEngine(
     stats.setSeed(config.seed)
 
     // Setup environment
-    codeExecutor.setupEnvironment()
+    val terminateF = codeExecutor.setupEnvironment()
     dataAdapter.loadData(codeExecutor)
 
     // Track time for timeout
@@ -162,10 +162,9 @@ class FuzzerEngine(
         val dagYamlFiles = generateYamlFiles(config.d)
 
         for (dagYamlFile <- dagYamlFiles if !shouldStop) {
-          val dag = DAGParser.parseYamlFile(dagYamlFile.getAbsolutePath, map => DFOperator.fromMap(map))
 
           println(s"Processing ${dagYamlFile.getName}")
-          processSingleDAG(dag, stats, shouldStop)
+          processSingleDAG(dagYamlFile, stats, shouldStop, startTime)
         }
       }
 
@@ -173,7 +172,7 @@ class FuzzerEngine(
       FuzzerResults(stats)
     } finally {
       // Clean up
-      codeExecutor.teardownEnvironment()
+      codeExecutor.tearDownEnvironment(terminateF)
     }
   }
 
@@ -245,7 +244,10 @@ class FuzzerEngine(
 
   }
 
-  private def processSingleDAG(dag: Graph[DFOperator], stats: CampaignStats, shouldStop: => Boolean): Unit = {
+  private def processSingleDAG(dagYamlFile: File, stats: CampaignStats, shouldStop: => Boolean, startTime: Long): Unit = {
+    val dag = DAGParser.parseYamlFile(dagYamlFile.getAbsolutePath, map => DFOperator.fromMap(map))
+    val dagName = dagYamlFile.getName
+
     try {
       val (isInvalid, message) = isInvalidDFG(dag)
       if (isInvalid) {
@@ -264,6 +266,50 @@ class FuzzerEngine(
             val selectedTables = Random.shuffle(dataAdapter.getTables).take(dag.getSourceNodes.length).toList
             val sourceCode = generateSingleProgram(dag, spec, codeGenerator.getDag2CodeFunc, selectedTables)
             val results = codeExecutor.execute(sourceCode)
+
+            stats.setCumulativeCoverageIfChanged(
+              results.coverage,
+              fuzzer.core.global.State.iteration,
+              (System.currentTimeMillis()-startTime)/1000)
+
+            val result = results.exception
+            val resultType = result.getClass.toString.split('.').last
+            val ruleBranchesCovered = results.coverage.toSet.size
+
+            result match {
+              case _: Success =>
+                println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration} GENERATED: ${stats.getGenerated}====")
+                println(s"RESULT: $result")
+                println(s"$ruleBranchesCovered")
+              case _: MismatchException =>
+                println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration}====")
+                println(s"RESULT: $result")
+                println(s"$ruleBranchesCovered")
+              case _ =>
+                println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration}====")
+                println(s"RESULT: $resultType")
+            }
+            stats.updateWith(resultType) {
+              case Some(existing) => Some((existing.toInt + 1).toString)
+              case None => Some("1")
+            }
+
+            // Create subdirectory inside outDir using the result value
+            val resultSubDir = new File(config.outDir, resultType)
+            resultSubDir.mkdirs() // Creates the directory if it doesn't exist
+
+            // Prepare output file in the result-named subdirectory
+            val outFileName = s"g_${stats.getGenerated}-a_${stats.getAttempts}-${dagName.stripSuffix(".yaml")}-dfg$i${config.outExt}"
+            val outFile = new File(resultSubDir, outFileName)
+
+            // Write the fullSource to the file
+            val writer = new FileWriter(outFile)
+            writer.write(results.combinedSourceWithResults+s"\n\n//Optimizer Branch Coverage: $ruleBranchesCovered")
+            writer.close()
+
+            if (stats.getGenerated % config.updateLiveStatsAfter == 0) {
+              writeLiveStats(config, stats, startTime)
+            }
 
             stats.setGenerated(stats.getGenerated+1)
           } catch {
@@ -287,7 +333,6 @@ class FuzzerEngine(
         println(s"Failed to parse DAG file: ???. Reason: ${ex.getMessage}")
     }
   }
-
 }
 
 case class FuzzerResults(stats: CampaignStats)

@@ -1,11 +1,23 @@
 package fuzzer.adapters.flink
 
 import fuzzer.code.SourceCode
+import fuzzer.core.exceptions
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
-import fuzzer.data.tables.TableMetadata
-import play.api.libs.json.JsValue
+import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
+import fuzzer.data.types._
+import fuzzer.utils.network.HttpUtils
+import play.api.libs.json._
+
+import java.io.{BufferedWriter, IOException, OutputStreamWriter}
+import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.net.URI
+import java.time.Duration
+import java.net.{ConnectException, Socket}
+import scala.sys.process._
+import scala.util.{Failure, Success, Try}
+
 
 class FlinkCodeGenerator(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Graph[DFOperator] => SourceCode) extends CodeGenerator {
 
@@ -14,31 +26,224 @@ class FlinkCodeGenerator(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Grap
 
 class FlinkDataAdapter(config: FuzzerConfig) extends DataAdapter {
 
-  override def getTables(): Seq[TableMetadata] = ???
+  override def getTables: Seq[TableMetadata] = {
+    try {
+      // Create request JSON
+      val requestJson = Json.obj("message_type" -> "get_tables")
+
+      val response = HttpUtils.postJson(requestJson, host="localhost", port=8888)
+      val responseJson = Json.parse(response.body())
+
+      // Parse response
+      val tables = (responseJson \ "tables").as[JsArray]
+
+      tables.value.map { tableJson =>
+        val identifier = (tableJson \ "identifier").as[String]
+        val metadata = (tableJson \ "metadata").asOpt[Map[String, String]].getOrElse(Map.empty)
+
+        val columns = (tableJson \ "columns").as[JsArray].value.map { columnJson =>
+          val name = (columnJson \ "name").as[String]
+          val dataTypeStr = (columnJson \ "dataType").as[String]
+          val isNullable = (columnJson \ "isNullable").asOpt[Boolean].getOrElse(true)
+          val isKey = (columnJson \ "isKey").asOpt[Boolean].getOrElse(false)
+          val defaultValue = (columnJson \ "defaultValue").asOpt[String].map(parseDefaultValue(_, dataTypeStr))
+          val colMetadata = (columnJson \ "metadata").asOpt[Map[String, String]].getOrElse(Map.empty)
+
+          ColumnMetadata(
+            name = name,
+            dataType = parseDataType(dataTypeStr),
+            isNullable = isNullable,
+            isKey = isKey,
+            defaultValue = defaultValue,
+            metadata = colMetadata
+          )
+        }
+
+        TableMetadata(identifier, columns.toSeq, metadata)
+      }.toSeq
+
+    } catch {
+      case _: Exception => Seq.empty[TableMetadata]
+    }
+  }
+
+  private def parseDataType(dataTypeStr: String): DataType = {
+    dataTypeStr.toLowerCase match {
+      case "boolean" => BooleanType
+      case "date" => DateType
+      case "decimal" => DecimalType
+      case "float" => FloatType
+      case "integer" | "int" => IntegerType
+      case "long" => LongType
+      case _ => StringType
+    }
+  }
+
+  private def parseDefaultValue(valueStr: String, dataTypeStr: String): Any = {
+    Try {
+      dataTypeStr.toLowerCase match {
+        case "boolean" => valueStr.toBoolean
+        case "decimal" => BigDecimal(valueStr)
+        case "float" => valueStr.toFloat
+        case "integer" | "int" => valueStr.toInt
+        case "long" => valueStr.toLong
+        case _ => valueStr
+      }
+    }.getOrElse(valueStr)
+  }
 
   override def getTableByName(name: String): Option[TableMetadata] = ???
 
   override def loadData(executor: CodeExecutor): Unit = {
-    ???
+    // Create JSON request
+    val request = Json.obj(
+      "message_type" -> "load_data"
+    )
+
+    val response = HttpUtils.postJson(request, "localhost", 8888, timeoutSeconds = 120)
+
+    val body = Json.parse(response.body())
+    val success = (body \ "success").asOpt[Boolean]
+    success match {
+      case Some(true) =>
+      case _ => throw new Exception("PyFlink server failed to load data!")
+    }
   }
 
 }
 
 class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor {
 
-  override def execute(code: SourceCode): ExecutionResult = {
-
-    ???
+  private def parseResponse(responseBody: String): Option[JsValue] = {
+    if (responseBody.nonEmpty) {
+      Some(Json.parse(responseBody))
+    } else {
+      None
+    }
   }
 
-  override def setupEnvironment(): Unit = {
-    ???
+  private def jsonToMap(responseJson: JsValue): Map[String, Any] = {
+    Map(
+      "success" -> (responseJson \ "success").as[Boolean],
+      "message" -> (responseJson \ "message").as[String],
+      "error" -> (responseJson \ "error").as[String],
+      "programNumber" -> (responseJson \ "program_number").as[Int],
+      "returnCode" -> (responseJson \ "return_code").as[Int],
+      "stdout" -> (responseJson \ "stdout").as[String],
+      "stderr" -> (responseJson \ "stderr").as[String],
+    )
   }
 
-  override def teardownEnvironment(): Unit = {
-    // Stop SparkSession
-    // ...
-    ???
+
+  private def printResponse(responseMap: Map[String, Any]): Unit = {
+      println(s"Server response - Success: ${responseMap("success")}")
+      println(s"Program Number: ${responseMap("programNumber")}")
+      println(s"Return Code: ${responseMap("returnCode")}")
+      println(s"Message: ${responseMap("message")}")
+      println(s"Error: ${responseMap("error")}")
+      println(s"STDOUT:\n${responseMap("stdout")}")
+      println(s"STDERR:\n${responseMap("stderr")}")
+  }
+  override def execute(sourceCode: SourceCode): ExecutionResult = {
+
+    // Server configuration
+    val serverHost = "localhost"
+    val serverPort = 8888
+
+    // Send source code to Python server as JSON HTTP request
+    val sourceLines = sourceCode.toString.split("\n")
+    val (first5Lines, rest) = sourceLines.splitAt(6)
+    val addedCode = List(
+      // """print(f"COLS: {auto0.get_schema().get_field_names()}")""",
+      // """print(f"COLS: {auto6.get_schema().get_field_names()}")""",
+      // """
+      // |print("COLUMNS:", auto11.get_schema().get_field_names())
+      // |
+      // |result = auto11.execute()
+      // |for i, row in enumerate(result.collect()):
+      // |    if i >= 10:  # limit to first 10 rows
+      // |        break
+      // |    print(row)""".stripMargin
+    )
+    val codeString = (first5Lines ++ addedCode ++ rest).mkString("\n")
+
+    // Create JSON request
+    val jsonRequest = Json.obj(
+      "message_type" -> "execute_code",
+      "code" -> codeString
+    )
+
+    val response = HttpUtils.postJson(jsonRequest, serverHost, serverPort)
+
+    println(s"HTTP Response Status: ${response.statusCode()}")
+    val responseBody = response.body()
+
+    val responseJsonOpt = parseResponse(responseBody)
+
+    val responseJson = responseJsonOpt match {
+      case None => throw new Exception("response could not be parsed")
+      case Some(responseJson) => responseJson
+    }
+
+    val responseMap = jsonToMap(responseJson)
+    printResponse(responseMap)
+
+    mapToExecutionResult(responseMap)
+  }
+
+  private def mapToExecutionResult(responseMap: Map[String, Any]): ExecutionResult = {
+    ExecutionResult(
+      success = responseMap("success").asInstanceOf[Boolean],
+      exception = exception,
+      combinedSourceWithResults = responseMap("finalCode").asInstanceOf[String])
+  }
+
+  override def setupEnvironment(): () => Unit = {
+    val processBuilder = Process("pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py")
+    val process = processBuilder.run()
+
+    () => process.destroy()
+
+//    // Start the Python server process in the background
+//    val processBuilder = Process("python pyflink-oracle-server/pyflink-oracle-server.py")
+//    val process = processBuilder.run()
+//
+//    // Wait for the server to be ready by attempting connections
+//    val startTime = System.currentTimeMillis()
+//    val timeoutMs = 60000 // 60 seconds
+//    val retryIntervalMs = 1000 // 1 second between attempts
+//
+//    var connected = false
+//
+//    while (!connected && (System.currentTimeMillis() - startTime) < timeoutMs) {
+//      Try {
+//        val socket = new Socket("localhost", 8888)
+//        socket.close()
+//        connected = true
+//      } match {
+//        case Success(_) =>
+//          connected = true
+//          println("Successfully connected to server at localhost:8888")
+//        case Failure(_: ConnectException) =>
+//          // Server not ready yet, wait and retry
+//          Thread.sleep(retryIntervalMs)
+//        case Failure(ex: IOException) =>
+//          // Other IO exception, wait and retry
+//          Thread.sleep(retryIntervalMs)
+//      }
+//    }
+//
+//    if (!connected) {
+//      // Clean up: terminate the process if it's still running
+//      process.destroy()
+//      throw new RuntimeException(
+//        s"Failed to establish connection to server at localhost:8888 within ${timeoutMs / 1000} seconds"
+//      )
+//    }
+  }
+
+  override def tearDownEnvironment(terminateF: () => Unit): Unit = {
+    terminateF()
   }
 
 }

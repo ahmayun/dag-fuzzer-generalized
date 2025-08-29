@@ -1,8 +1,10 @@
 package fuzzer.core.interfaces
 
+import scala.collection.mutable.ListBuffer
+
 case class ExecutionResult(
                             success: Boolean,
-                            output: Option[String] = None,
-                            error: Option[Throwable] = None,
-                            metrics: Map[String, Any] = Map.empty
+                            exception: Throwable,
+                            combinedSourceWithResults: String = "",
+                            coverage: ListBuffer[String] = ListBuffer.empty
                           )

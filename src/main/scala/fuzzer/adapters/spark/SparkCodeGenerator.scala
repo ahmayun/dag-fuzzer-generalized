@@ -9,6 +9,7 @@ import fuzzer.data.tables.TableMetadata
 import fuzzer.templates.Harness
 import fuzzer.utils.spark.tpcds.TPCDSTablesLoader
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule.coverage
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import play.api.libs.json.JsValue
 
@@ -133,19 +134,50 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     (compare, (optEx, fullSourceOpt), (unOptEx, fullSourceUnOpt))
   }
 
+  private def constructFileContents(result: Throwable, fullSourceOpt: String): String = {
+
+    val stackTrace = decideStackTrace(result)
+
+    val fullResult = s"$result\n$stackTrace"
+    Harness.embedCode(fullSourceOpt, fullResult, Harness.resultMark)
+  }
+
+  private def decideStackTrace(result: Throwable): String = {
+    result match {
+      case _ : fuzzer.core.exceptions.Success => ""
+      case _ => s"${result.getStackTrace.mkString("\n")}"
+    }
+  }
+
+  private def constructCombinedFileContents(result: Throwable, optResult: Throwable, unOptResult: Throwable, fullSourceOpt: String, fullSourceUnOpt: String): String = {
+    val optFileContents = constructFileContents(optResult, fullSourceOpt)
+    val unOptFileContents = constructFileContents(unOptResult, fullSourceUnOpt)
+    s"""
+       |$optFileContents
+       |
+       |$unOptFileContents
+       |
+       |/* ========== ORACLE RESULT ===================
+       |$result
+       |${decideStackTrace(result)}
+       |""".stripMargin
+  }
 
   var session: Option[SparkSession] = None
   override def execute(code: SourceCode): ExecutionResult = {
-    println("========== EXECUTING ===============")
-    println(code.toString)
-    println("---------- RESULT ------------------")
-    println(checkOneGo(code.toString))
-    println("====================================")
+    val (result, (optResult, fullSourceOpt), (unOptResult, fullSourceUnOpt)) = checkOneGo(code.toString)
+    val combinedSourceWithResults = constructCombinedFileContents(result, optResult, unOptResult, fullSourceOpt, fullSourceUnOpt)
 
-    ExecutionResult(success = true)
+    val success = if(result.isInstanceOf[Success]) true else false
+    ExecutionResult(
+      success = success,
+      exception = result,
+      combinedSourceWithResults = combinedSourceWithResults,
+      coverage = coverage.clone(),
+    )
   }
 
-  override def setupEnvironment(): Unit = {
+  override def setupEnvironment(): () => Unit = {
     val sparkSession = SparkSession.builder()
       .appName("Fuzzer")
       .master(config.master)
@@ -156,10 +188,12 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
     session = Some(sparkSession)
     fuzzer.core.global.State.sparkOption = session
+
+    () => sparkSession.stop()
   }
 
-  override def teardownEnvironment(): Unit = {
-
+  override def tearDownEnvironment(terminateF: () => Unit): Unit = {
+    terminateF()
   }
 
 }

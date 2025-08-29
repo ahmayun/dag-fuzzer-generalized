@@ -1,6 +1,7 @@
 package fuzzer.core.engine
 
 import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 
 class CampaignStats {
   val stats: mutable.Map[String, String] = mutable.Map[String, String](
@@ -9,6 +10,7 @@ class CampaignStats {
     "dag-batch" -> "0",
     "elapsed-seconds" -> "0",
     "covered-rules" -> "",
+    "cumulative-coverage" -> "0",
     "seed" -> ""
   )
 
@@ -45,7 +47,9 @@ class CampaignStats {
     stats.updateWith(key)(remappingFunc)
   }
 
-  def setCumulativeCoverageIfChanged(cov: Set[String], iter: Long, elapsedSeconds: Long): Unit = {
+  def setCumulativeCoverageIfChanged(coverage: ListBuffer[String], iter: Long, elapsedSeconds: Long): Unit = {
+    val cumuCoverage = this.getCoveredRules.toSet
+    val cov = cumuCoverage.union(coverage.toSet)
     val size = cov.size
     val existing = stats.get("cumulative-coverage")
     if (existing.isEmpty || existing.get != size.toString) {

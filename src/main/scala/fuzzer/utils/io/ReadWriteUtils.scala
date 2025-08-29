@@ -64,4 +64,16 @@ object ReadWriteUtils {
       writer.close()
     }
   }
+
+  def writeLiveStats(config: FuzzerConfig, stats: CampaignStats, campaignStartTime: Long): Unit = {
+    val currentTime = System.currentTimeMillis()
+    val elapsedSeconds = (currentTime - campaignStartTime) / 1000
+    val liveStatsDir =s"${config.outDir}/live-stats"
+    new File(liveStatsDir).mkdirs()
+    val liveStatsFile = new File(liveStatsDir, s"live-stats-${fuzzer.core.global.State.iteration}-${elapsedSeconds}s.txt")
+    val liveStatsWriter = new FileWriter(liveStatsFile)
+    stats.setElapsedSeconds(elapsedSeconds)
+    liveStatsWriter.write(prettyPrintStats(stats))
+    liveStatsWriter.close()
+  }
 }

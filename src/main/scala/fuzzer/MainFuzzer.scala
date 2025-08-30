@@ -1,52 +1,61 @@
 package fuzzer
 
+import fuzzer.code.SourceCode
 import fuzzer.core.engine.FuzzerEngine
 import fuzzer.core.global.FuzzerConfig
+import fuzzer.core.graph.{DFOperator, Graph}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
 import fuzzer.factory.AdapterFactory
+import fuzzer.framework.UserImplSparkScala
 import fuzzer.utils.io.ReadWriteUtils._
 import fuzzer.utils.json.JsonReader
 import fuzzer.utils.random.Random
 import play.api.libs.json.JsValue
 
-
-/**
- * Entry point for the DAG Fuzzer application.
- * This class is responsible for configuring and running the fuzzer engine
- * but delegates all fuzzing logic to the engine and API-specific implementations.
- */
 object MainFuzzer {
-  /**
-   * Main method that processes command line arguments, initializes the fuzzer,
-   * and runs the fuzzing campaign.
-   *
-   * @param args Command line arguments, expecting a path to a config file as the first argument
-   */
+
+  def createEngineFromConfig(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Graph[DFOperator] => SourceCode): FuzzerEngine = {
+
+    val (dataAdapter, codeGenerator, codeExecutor) = AdapterFactory.createComponents(config, dag2CodeFunc)
+
+    val engine = new FuzzerEngine(
+      config = config,
+      spec = spec,
+      dataAdapter = dataAdapter,
+      codeGenerator = codeGenerator,
+      codeExecutor = codeExecutor
+    )
+
+    engine
+  }
+
   def main(args: Array[String]): Unit = {
-    // Parse config from file or use default
-    val config = FuzzerConfig.getSparkScalaConfig
+
+    val config = args.head match {
+      case "spark-scala" => FuzzerConfig.getSparkScalaConfig.copy(seed = 1234)
+      case "flink-python" => FuzzerConfig.getFlinkPythonConfig.copy(seed = 1234)
+      case _ => throw new IllegalArgumentException("Required args not provided")
+    }
+
+    val spec = JsonReader.readJsonFile(config.specPath)
+
+    val dag2SparkScalaFunc = UserImplSparkScala.dag2SparkScala(spec) _
+    val engine = createEngineFromConfig(config, spec, dag2SparkScalaFunc)
+
     fuzzer.core.global.State.config = Some(config)
-    // Set random seed for reproducibility
     Random.setSeed(config.seed)
 
-    // Clean output directories
     deleteDir(config.dagGenDir)
     deleteDir(config.outDir)
     createDir(config.outDir)
 
-    // Log basic information
     println(s"Starting fuzzing campaign with seed: ${config.seed}")
     println(s"Target API: ${config.targetAPI}")
 
-    // Create API-specific components using factory
-    val (dataAdapter, codeGenerator, codeExecutor) = AdapterFactory.createComponents(config, null)
-
-    // Create and run the fuzzer engine
     val startTime = System.currentTimeMillis()
-    val spec = JsonReader.readJsonFile(config.specPath)
 
-    val engine = createFuzzerEngine(config, spec, dataAdapter, codeGenerator, codeExecutor)
     val results = engine.run()
+
     val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
 
     // Print final results
@@ -55,25 +64,6 @@ object MainFuzzer {
 
     // Save detailed results to file
     saveResultsToFile(config, results, elapsedSeconds)
-  }
-
-  /**
-   * Creates a fuzzer engine with the specified components.
-   */
-  private def createFuzzerEngine(
-                                  config: FuzzerConfig,
-                                  spec: JsValue,
-                                  dataAdapter: DataAdapter,
-                                  codeGenerator: CodeGenerator,
-                                  codeExecutor: CodeExecutor
-                                ): FuzzerEngine = {
-    new FuzzerEngine(
-      config = config,
-      spec = spec,
-      dataAdapter = dataAdapter,
-      codeGenerator = codeGenerator,
-      codeExecutor = codeExecutor
-    )
   }
 
 }

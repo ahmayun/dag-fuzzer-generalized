@@ -1,4 +1,4 @@
-package fuzzer
+package fuzzer.framework
 
 import fuzzer.code.SourceCode
 import fuzzer.core.graph.{DFOperator, Graph, Node}

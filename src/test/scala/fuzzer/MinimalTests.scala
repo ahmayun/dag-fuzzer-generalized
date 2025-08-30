@@ -1,6 +1,6 @@
 package fuzzer
 
-import fuzzer.MainFuzzer.createFuzzerEngine
+import fuzzer.MainFuzzer.{createEngineFromConfig, createFuzzerEngine}
 import fuzzer.adapters.spark.{SparkCodeExecutor, SparkCodeGenerator, SparkDataAdapter}
 import fuzzer.code.SourceCode
 import fuzzer.core.engine.FuzzerEngine
@@ -9,6 +9,7 @@ import fuzzer.core.graph.{DFOperator, Graph}
 import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
 import fuzzer.data.types.IntegerType
 import fuzzer.factory.AdapterFactory
+import fuzzer.framework.{UserImplFlinkPython, UserImplSparkScala}
 import fuzzer.utils.io.ReadWriteUtils.{createDir, deleteDir, prettyPrintStats, saveResultsToFile}
 import fuzzer.utils.json.JsonReader
 import fuzzer.utils.network.HttpUtils
@@ -52,25 +53,6 @@ class MinimalTests {
   val tpcdsTables: List[TableMetadata] = List (
 
   )
-
-  def createEngineFromConfig(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Graph[DFOperator] => SourceCode): FuzzerEngine = {
-
-    // Create API-specific components using factory
-//    val dataAdapter = new SparkDataAdapter(config)
-//    val codeGenerator = new SparkCodeGenerator(config, spec)
-//    val codeExecutor = new SparkCodeExecutor(config, spec)
-    val (dataAdapter, codeGenerator, codeExecutor) = AdapterFactory.createComponents(config, dag2CodeFunc)
-
-    val engine = new FuzzerEngine(
-      config = config,
-      spec = spec,
-      dataAdapter = dataAdapter,
-      codeGenerator = codeGenerator,
-      codeExecutor = codeExecutor
-    )
-
-    engine
-  }
 
   @Test
   def testSparkScalaGen(): Unit = {

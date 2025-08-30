@@ -1,7 +1,7 @@
 package fuzzer.core.engine
 
 import fuzzer.code.SourceCode
-import fuzzer.core.exceptions.{ImpossibleDFGException, MismatchException, Success}
+import fuzzer.core.exceptions.{DAGFuzzerException, ImpossibleDFGException, MismatchException, Success}
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DAGParser, DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
@@ -170,6 +170,11 @@ class FuzzerEngine(
 
       // Return final results
       FuzzerResults(stats)
+    } catch {
+      case ex: DAGFuzzerException =>
+        println(s"ERROR MSG: ${ex.inner.getMessage}")
+        codeExecutor.tearDownEnvironment(terminateF)
+        throw ex.inner
     } finally {
       // Clean up
       codeExecutor.tearDownEnvironment(terminateF)
@@ -277,6 +282,7 @@ class FuzzerEngine(
             val ruleBranchesCovered = results.coverage.toSet.size
 
             result match {
+              case ex: DAGFuzzerException => throw ex
               case _: Success =>
                 println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration} GENERATED: ${stats.getGenerated}====")
                 println(s"RESULT: $result")
@@ -313,6 +319,7 @@ class FuzzerEngine(
 
             stats.setGenerated(stats.getGenerated+1)
           } catch {
+            case ex: DAGFuzzerException => throw ex
             case ex: Exception =>
               println("==========")
               println(s"DFG construction or codegen failed, attempt #$i. Reason: $ex")
@@ -328,6 +335,7 @@ class FuzzerEngine(
       case ex: ImpossibleDFGException =>
         stats.setAttempts(stats.getAttempts+1)
         println(s"DFG construction or codegen failed for ??? . Reason: ${ex.getMessage}")
+      case ex: DAGFuzzerException => throw ex
       case ex: Exception =>
         stats.setAttempts(stats.getAttempts+1)
         println(s"Failed to parse DAG file: ???. Reason: ${ex.getMessage}")

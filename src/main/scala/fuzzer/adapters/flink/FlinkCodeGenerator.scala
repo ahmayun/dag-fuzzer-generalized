@@ -2,6 +2,7 @@ package fuzzer.adapters.flink
 
 import fuzzer.code.SourceCode
 import fuzzer.core.exceptions
+import fuzzer.core.exceptions.DAGFuzzerException
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
@@ -10,7 +11,7 @@ import fuzzer.data.types._
 import fuzzer.utils.network.HttpUtils
 import play.api.libs.json._
 
-import java.io.{BufferedWriter, IOException, OutputStreamWriter}
+import java.io.{BufferedWriter, File, IOException, OutputStreamWriter}
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.net.URI
 import java.time.Duration
@@ -123,24 +124,29 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
   }
 
   private def jsonToMap(responseJson: JsValue): Map[String, Any] = {
-    Map(
-      "success" -> (responseJson \ "success").as[Boolean],
-      "message" -> (responseJson \ "message").as[String],
-      "error" -> (responseJson \ "error").as[String],
-      "programNumber" -> (responseJson \ "program_number").as[Int],
-      "returnCode" -> (responseJson \ "return_code").as[Int],
-      "stdout" -> (responseJson \ "stdout").as[String],
-      "stderr" -> (responseJson \ "stderr").as[String],
-    )
+
+    println("RAW RESPONSE")
+    println(responseJson.toString())
+    try {
+      Map(
+        "success" -> (responseJson \ "success").as[Boolean],
+        "error_message" -> (responseJson \ "error_message").as[String],
+        "error_name" -> (responseJson \ "error_name").as[String],
+        "return_code" -> (responseJson \ "return_code").as[Int],
+        "final_program" -> (responseJson \ "final_program").as[String],
+        "stdout" -> (responseJson \ "stdout").as[String],
+        "stderr" -> (responseJson \ "stderr").as[String],
+      )
+    } catch {
+      case ex: Exception => throw new DAGFuzzerException(ex.getMessage, ex)
+    }
+
   }
 
 
   private def printResponse(responseMap: Map[String, Any]): Unit = {
       println(s"Server response - Success: ${responseMap("success")}")
-      println(s"Program Number: ${responseMap("programNumber")}")
-      println(s"Return Code: ${responseMap("returnCode")}")
-      println(s"Message: ${responseMap("message")}")
-      println(s"Error: ${responseMap("error")}")
+      println(s"Return Code: ${responseMap("return_code")}")
       println(s"STDOUT:\n${responseMap("stdout")}")
       println(s"STDERR:\n${responseMap("stderr")}")
   }
@@ -192,14 +198,16 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
   }
 
   private def mapToExecutionResult(responseMap: Map[String, Any]): ExecutionResult = {
+    val success = responseMap("success").asInstanceOf[Boolean]
+    val errorName = responseMap("error_name").asInstanceOf[String]
     ExecutionResult(
-      success = responseMap("success").asInstanceOf[Boolean],
-      exception = exception,
-      combinedSourceWithResults = responseMap("finalCode").asInstanceOf[String])
+      success = success,
+      exception = if (success) new exceptions.Success("dummy") else new Exception(errorName),
+      combinedSourceWithResults = responseMap.get("final_program").orNull.asInstanceOf[String])
   }
 
   override def setupEnvironment(): () => Unit = {
-    val processBuilder = Process("pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py")
+    val processBuilder = Process("pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py") #> new File(".server.log")
     val process = processBuilder.run()
 
     () => process.destroy()

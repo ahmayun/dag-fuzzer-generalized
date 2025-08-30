@@ -206,6 +206,9 @@ from pyflink.table import expressions as expr
         stdout_capture = StringIO()
         stderr_capture = StringIO()
 
+        error_name = None
+        error_msg = None
+
         full_code = received_code
 #         full_code = self.add_imports(received_code)
         try:
@@ -219,7 +222,10 @@ from pyflink.table import expressions as expr
                     'stdout': '',
                     'stderr': setup_error,
                     'return_code': -1,
-                    'success': False
+                    'success': False,
+                    'error_message': error_msg,
+                    'error_name': error_name,
+                    'final_program': ""
                 }
 
             # Execute the received code in the namespace with output capture
@@ -231,24 +237,11 @@ from pyflink.table import expressions as expr
                     success = True
                     error_msg = None
                     print(f"[{datetime.now()}] Code executed successfully via exec()")
-                except SyntaxError as se:
-                    print(f"[{datetime.now()}] exec() failed with SyntaxError, trying eval()...")
-                    # If exec fails, try eval for expressions
-                    try:
-                        result = eval(full_code, namespace, namespace)
-                        if result is not None:
-                            print(result)  # This will go to stdout_capture
-                        success = True
-                        error_msg = None
-                        print(f"[{datetime.now()}] Code executed successfully via eval()")
-                    except Exception as e:
-                        success = False
-                        error_msg = f"Eval execution error: {str(e)}\n{traceback.format_exc()}"
-                        print(f"[{datetime.now()}] Eval failed: {error_msg}")
                 except Exception as e:
                     success = False
+                    error_name = type(e).__name__
                     error_msg = f"Exec execution error: {str(e)}\n{traceback.format_exc()}"
-                    print(f"[{datetime.now()}] Exec failed: {error_msg}")
+                    print(f"[{datetime.now()}] Exec failed: {str(e)}")
 
             stdout_output = stdout_capture.getvalue()
             stderr_output = stderr_capture.getvalue()
@@ -279,7 +272,10 @@ from pyflink.table import expressions as expr
                 'stdout': stdout_output,
                 'stderr': stderr_output,
                 'return_code': 0 if success else 1,
-                'success': success
+                'success': success,
+                'error_message': error_msg,
+                'error_name': error_name,
+                'final_program': full_code
             }
 
         except Exception as e:
@@ -293,7 +289,8 @@ from pyflink.table import expressions as expr
                 'stderr': error_msg,
                 'return_code': -1,
                 'success': False,
-                'namespace': None
+                'namespace': None,
+                'error_name': error_name
             }
 
     def handle_execute_code(self, request_dict):

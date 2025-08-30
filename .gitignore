@@ -11,3 +11,4 @@ parquet-to-csv.scala
 server-log/
 tpcds-csv/
 venv/
+*.log

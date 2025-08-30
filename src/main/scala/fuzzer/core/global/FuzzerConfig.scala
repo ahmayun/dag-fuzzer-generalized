@@ -75,7 +75,7 @@ object FuzzerConfig {
       d = 200,
       p = 10,
       outDir = "./target/dagfuzz-out/flink-python",
-      outExt = ".scala",
+      outExt = ".py",
       timeLimitSec = 10,
       dagGenDir = "dag-gen/DAGs/DAGs",
       localTpcdsPath = "tpcds-data",

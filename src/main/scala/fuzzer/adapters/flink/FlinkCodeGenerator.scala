@@ -222,49 +222,20 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   override def setupEnvironment(): () => Unit = {
     val processBuilder = Process("pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py") #> new File(".server.log")
-    val process = processBuilder.run()
 
+    try {
+      val process = processBuilder.run()
 
-    () => {
-      process.destroy()
+      () => {
+        process.destroy()
+      }
+    } catch {
+      case e: Exception if e.getMessage != null && e.getMessage.contains("Address already in use") =>
+        println("WARNING: Server start failed because address is already in use, continuing anyway")
+        () => {} // Return empty cleanup function
+      case e: Exception =>
+        throw e // Re-throw other exceptions
     }
-
-//    // Start the Python server process in the background
-//    val processBuilder = Process("python pyflink-oracle-server/pyflink-oracle-server.py")
-//    val process = processBuilder.run()
-//
-//    // Wait for the server to be ready by attempting connections
-//    val startTime = System.currentTimeMillis()
-//    val timeoutMs = 60000 // 60 seconds
-//    val retryIntervalMs = 1000 // 1 second between attempts
-//
-//    var connected = false
-//
-//    while (!connected && (System.currentTimeMillis() - startTime) < timeoutMs) {
-//      Try {
-//        val socket = new Socket("localhost", 8888)
-//        socket.close()
-//        connected = true
-//      } match {
-//        case Success(_) =>
-//          connected = true
-//          println("Successfully connected to server at localhost:8888")
-//        case Failure(_: ConnectException) =>
-//          // Server not ready yet, wait and retry
-//          Thread.sleep(retryIntervalMs)
-//        case Failure(ex: IOException) =>
-//          // Other IO exception, wait and retry
-//          Thread.sleep(retryIntervalMs)
-//      }
-//    }
-//
-//    if (!connected) {
-//      // Clean up: terminate the process if it's still running
-//      process.destroy()
-//      throw new RuntimeException(
-//        s"Failed to establish connection to server at localhost:8888 within ${timeoutMs / 1000} seconds"
-//      )
-//    }
   }
 
   override def tearDownEnvironment(terminateF: () => Unit): Unit = {

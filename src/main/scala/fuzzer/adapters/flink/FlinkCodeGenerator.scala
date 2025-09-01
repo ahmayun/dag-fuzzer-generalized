@@ -27,12 +27,17 @@ class FlinkCodeGenerator(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Grap
 
 class FlinkDataAdapter(config: FuzzerConfig) extends DataAdapter {
 
+  // Create HTTP client and request
+  val client: HttpClient = HttpClient.newBuilder()
+    .connectTimeout(Duration.ofSeconds(120))
+    .build()
+
   override def getTables: Seq[TableMetadata] = {
     try {
       // Create request JSON
       val requestJson = Json.obj("message_type" -> "get_tables")
 
-      val response = HttpUtils.postJson(requestJson, host="localhost", port=8888)
+      val response = HttpUtils.postJson(client, requestJson, host="localhost", port=8888)
       val responseJson = Json.parse(response.body())
 
       // Parse response
@@ -101,7 +106,7 @@ class FlinkDataAdapter(config: FuzzerConfig) extends DataAdapter {
       "message_type" -> "load_data"
     )
 
-    val response = HttpUtils.postJson(request, "localhost", 8888, timeoutSeconds = 120)
+    val response = HttpUtils.postJson(client, request, "localhost", 8888, timeoutSeconds = 120)
 
     val body = Json.parse(response.body())
     val success = (body \ "success").asOpt[Boolean]
@@ -114,6 +119,11 @@ class FlinkDataAdapter(config: FuzzerConfig) extends DataAdapter {
 }
 
 class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor {
+
+  // Create HTTP client and request
+  val client: HttpClient = HttpClient.newBuilder()
+    .connectTimeout(Duration.ofSeconds(120))
+    .build()
 
   private def parseResponse(responseBody: String): Option[JsValue] = {
     if (responseBody.nonEmpty) {
@@ -143,13 +153,13 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   }
 
-
   private def printResponse(responseMap: Map[String, Any]): Unit = {
       println(s"Server response - Success: ${responseMap("success")}")
       println(s"Return Code: ${responseMap("return_code")}")
       println(s"STDOUT:\n${responseMap("stdout")}")
       println(s"STDERR:\n${responseMap("stderr")}")
   }
+
   override def execute(sourceCode: SourceCode): ExecutionResult = {
 
     // Server configuration
@@ -179,7 +189,7 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
       "code" -> codeString
     )
 
-    val response = HttpUtils.postJson(jsonRequest, serverHost, serverPort)
+    val response = HttpUtils.postJson(client, jsonRequest, serverHost, serverPort)
 
     println(s"HTTP Response Status: ${response.statusCode()}")
     val responseBody = response.body()
@@ -222,19 +232,10 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   override def setupEnvironment(): () => Unit = {
     val processBuilder = Process("pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py") #> new File(".server.log")
+    val process = processBuilder.run()
 
-    try {
-      val process = processBuilder.run()
-
-      () => {
-        process.destroy()
-      }
-    } catch {
-      case e: Exception if e.getMessage != null && e.getMessage.contains("Address already in use") =>
-        println("WARNING: Server start failed because address is already in use, continuing anyway")
-        () => {} // Return empty cleanup function
-      case e: Exception =>
-        throw e // Re-throw other exceptions
+    () => {
+      process.destroy()
     }
   }
 

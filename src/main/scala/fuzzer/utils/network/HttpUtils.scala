@@ -8,11 +8,7 @@ import java.time.Duration
 
 object HttpUtils {
 
-  def postJson(requestJson: JsObject, host: String, port: Int, timeoutSeconds: Int = 10): HttpResponse[String] = {
-    // Create HTTP client and request
-    val client = HttpClient.newBuilder()
-      .connectTimeout(Duration.ofSeconds(timeoutSeconds))
-      .build()
+  def postJson(client: HttpClient, requestJson: JsObject, host: String, port: Int, timeoutSeconds: Int = 10): HttpResponse[String] = {
 
     val request = HttpRequest.newBuilder()
       .uri(URI.create(s"http://$host:$port"))

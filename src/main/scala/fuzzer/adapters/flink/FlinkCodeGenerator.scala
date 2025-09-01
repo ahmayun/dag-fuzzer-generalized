@@ -2,7 +2,7 @@ package fuzzer.adapters.flink
 
 import fuzzer.code.SourceCode
 import fuzzer.core.exceptions
-import fuzzer.core.exceptions.DAGFuzzerException
+import fuzzer.core.exceptions.{DAGFuzzerException, ValidationException}
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
@@ -197,20 +197,37 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     mapToExecutionResult(responseMap)
   }
 
+  private def createException(errorName: String, errorMessage: String): Exception = {
+
+    errorName match {
+      case "ValidationException" => new ValidationException(errorMessage)
+      case _ => new Exception(errorMessage)
+    }
+  }
+
   private def mapToExecutionResult(responseMap: Map[String, Any]): ExecutionResult = {
     val success = responseMap("success").asInstanceOf[Boolean]
     val errorName = responseMap("error_name").asInstanceOf[String]
+    val errorMessage = responseMap("error_message").asInstanceOf[String]
+    val (stdout, stderr) = (responseMap("stdout").asInstanceOf[String], responseMap("stderr").asInstanceOf[String])
+
+    val finalProgram = responseMap.getOrElse("final_program", "").asInstanceOf[String]
+    val sourceWithResults = s"$finalProgram\n\nSTDOUT:\n$stdout\n\nSTDERR:\n$stderr"
+
     ExecutionResult(
       success = success,
-      exception = if (success) new exceptions.Success("dummy") else new Exception(errorName),
-      combinedSourceWithResults = responseMap.get("final_program").orNull.asInstanceOf[String])
+      exception = if (success) new exceptions.Success("dummy") else createException(errorName, errorMessage),
+      combinedSourceWithResults = sourceWithResults)
   }
 
   override def setupEnvironment(): () => Unit = {
     val processBuilder = Process("pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py") #> new File(".server.log")
     val process = processBuilder.run()
 
-    () => process.destroy()
+
+    () => {
+      process.destroy()
+    }
 
 //    // Start the Python server process in the background
 //    val processBuilder = Process("python pyflink-oracle-server/pyflink-oracle-server.py")

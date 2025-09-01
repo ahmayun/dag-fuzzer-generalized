@@ -1,6 +1,6 @@
 package fuzzer
 
-import fuzzer.MainFuzzer.{createEngineFromConfig, createFuzzerEngine}
+import fuzzer.MainFuzzer.createEngineFromConfig
 import fuzzer.adapters.spark.{SparkCodeExecutor, SparkCodeGenerator, SparkDataAdapter}
 import fuzzer.code.SourceCode
 import fuzzer.core.engine.FuzzerEngine

@@ -4,9 +4,8 @@ import fuzzer.code.SourceCode
 import fuzzer.core.engine.FuzzerEngine
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph}
-import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
 import fuzzer.factory.AdapterFactory
-import fuzzer.framework.UserImplSparkScala
+import fuzzer.framework.{UserImplFlinkPython, UserImplSparkScala}
 import fuzzer.utils.io.ReadWriteUtils._
 import fuzzer.utils.json.JsonReader
 import fuzzer.utils.random.Random
@@ -32,15 +31,21 @@ object MainFuzzer {
   def main(args: Array[String]): Unit = {
 
     val config = args.head match {
-      case "spark-scala" => FuzzerConfig.getSparkScalaConfig.copy(seed = 1234)
-      case "flink-python" => FuzzerConfig.getFlinkPythonConfig.copy(seed = 1234)
+      case "spark-scala" => FuzzerConfig.getSparkScalaConfig
+        .copy(seed = 1234)
+      case "flink-python" => FuzzerConfig.getFlinkPythonConfig
+        .copy(seed = 1234)
       case _ => throw new IllegalArgumentException("Required args not provided")
     }
 
     val spec = JsonReader.readJsonFile(config.specPath)
 
-    val dag2SparkScalaFunc = UserImplSparkScala.dag2SparkScala(spec) _
-    val engine = createEngineFromConfig(config, spec, dag2SparkScalaFunc)
+    val dag2CodeFunc = args.head match {
+      case "spark-scala" => UserImplSparkScala.dag2SparkScala(spec) _
+      case "flink-python" => UserImplFlinkPython.dag2FlinkPython(spec) _
+      case _ => throw new IllegalArgumentException("Required args not provided")
+    }
+    val engine = createEngineFromConfig(config, spec, dag2CodeFunc)
 
     fuzzer.core.global.State.config = Some(config)
     Random.setSeed(config.seed)

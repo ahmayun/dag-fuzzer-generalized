@@ -169,15 +169,13 @@ class FuzzerEngine(
       }
 
       // Return final results
+      codeExecutor.tearDownEnvironment(terminateF)
       FuzzerResults(stats)
     } catch {
       case ex: DAGFuzzerException =>
         println(s"ERROR MSG: ${ex.inner.getMessage}")
         codeExecutor.tearDownEnvironment(terminateF)
         throw ex.inner
-    } finally {
-      // Clean up
-      codeExecutor.tearDownEnvironment(terminateF)
     }
   }
 

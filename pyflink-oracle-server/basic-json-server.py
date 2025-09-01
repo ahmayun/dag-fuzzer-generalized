@@ -13,7 +13,6 @@ import glob
 import threading
 import json
 
-
 class GlobalState:
     host = 'localhost'
     port = 8888
@@ -201,6 +200,20 @@ from pyflink.table import expressions as expr
 {received_code}
 """
 
+    def extract_error_name(self, e):
+        if hasattr(e, 'java_exception'):
+            # Get the actual Java exception class name
+            java_error_name = e.java_exception.getClass().getName()
+
+            try:
+                return java_error_name.split(".")[-1]
+            except:
+                return java_error_name  # org.apache.flink.table.api.ValidationException
+        else:
+            # Fallback to Python exception name
+            error_name = type(e).__name__
+            return error_name
+
     def execute_flink_code(self, received_code):
         """Execute the received code in the pre-initialized Flink namespace"""
         stdout_capture = StringIO()
@@ -229,19 +242,17 @@ from pyflink.table import expressions as expr
                 }
 
             # Execute the received code in the namespace with output capture
+            print(f"[{datetime.now()}] Executing received code...")
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 try:
-                    print(f"[{datetime.now()}] Executing received code...")
                     # Try to execute as statements first
                     exec(full_code, namespace, namespace)
                     success = True
                     error_msg = None
-                    print(f"[{datetime.now()}] Code executed successfully via exec()")
                 except Exception as e:
                     success = False
-                    error_name = type(e).__name__
-                    error_msg = f"Exec execution error: {str(e)}\n{traceback.format_exc()}"
-                    print(f"[{datetime.now()}] Exec failed: {str(e)}")
+                    error_name = self.extract_error_name(e)
+                    error_msg = f"{str(e)}\n{traceback.format_exc()}"
 
             stdout_output = stdout_capture.getvalue()
             stderr_output = stderr_capture.getvalue()

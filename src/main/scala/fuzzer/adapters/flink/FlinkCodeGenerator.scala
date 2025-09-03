@@ -2,7 +2,7 @@ package fuzzer.adapters.flink
 
 import fuzzer.code.SourceCode
 import fuzzer.core.exceptions
-import fuzzer.core.exceptions.{DAGFuzzerException, ValidationException}
+import fuzzer.core.exceptions.{DAGFuzzerException, TableException, ValidationException}
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
@@ -211,6 +211,8 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
     errorName match {
       case "ValidationException" => new ValidationException(errorMessage)
+      case "RuntimeException" => new RuntimeException(errorMessage)
+      case "TableException" => new TableException(errorMessage)
       case _ => new Exception(errorMessage)
     }
   }

@@ -437,13 +437,13 @@ object UserImplFlinkPython {
       val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
       val svAfter = s"${node.value.stateView}"
 
-//      val line =
-//        s"""
-//          |# STATE VIEW BEFORE: $svBefore
-//          |$lhs$call
-//          |# STATE VIEW AFTER: $svAfter
-//          |""".stripMargin
-      val line = s"$lhs$call"
+      val line =
+        s"""
+          |# STATE VIEW BEFORE: $svBefore
+          |$lhs$call
+          |# STATE VIEW AFTER: $svAfter
+          |""".stripMargin
+//      val line = s"$lhs$call"
 
       l += line
 

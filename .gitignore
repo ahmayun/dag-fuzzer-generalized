@@ -12,3 +12,6 @@ server-log/
 tpcds-csv/
 venv/
 *.log
+error_analysis/
+flink-exceptions.txt
+tpcds-csv.zip

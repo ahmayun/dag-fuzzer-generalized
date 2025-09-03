@@ -10,6 +10,7 @@ import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
 import fuzzer.data.types.IntegerType
 import fuzzer.factory.AdapterFactory
 import fuzzer.framework.{UserImplFlinkPython, UserImplSparkScala}
+import fuzzer.utils.generation.dag.DAGGenUtils.generateSingleDAG
 import fuzzer.utils.io.ReadWriteUtils.{createDir, deleteDir, prettyPrintStats, saveResultsToFile}
 import fuzzer.utils.json.JsonReader
 import fuzzer.utils.network.HttpUtils
@@ -65,7 +66,7 @@ class MinimalTests {
     // This may generate an invalid DAG (that's normal
     // since I have no control over what the DAG module
     // will generate), change seed if the DAG is invalid.
-    val dag = engine.generateSingleDAG()
+    val dag = generateSingleDAG(config)
     println(dag)
 
     val sourceCode = engine.generateSingleProgram(dag, spec, dag2SparkScalaFunc, hardcodedTables)
@@ -88,7 +89,7 @@ class MinimalTests {
     // This may generate an invalid DAG (that's normal
     // since I have no control over what the DAG module
     // will generate), change seed if the DAG is invalid.
-    val dag = engine.generateSingleDAG()
+    val dag = generateSingleDAG(config)
     println(dag)
 
     val sourceCode = engine.generateSingleProgram(dag, spec, dag2FlinkPythonFunc, fuzzer.data.tables.Examples.tpcdsTables)
@@ -122,6 +123,11 @@ class MinimalTests {
     val serverHost = "localhost"
     val serverPort = 8888
 
+    // Create HTTP client and request
+    val client: HttpClient = HttpClient.newBuilder()
+      .connectTimeout(Duration.ofSeconds(120))
+      .build()
+
     // Send source code to Python server as JSON HTTP request
       val sourceLines = sourceCode.toString.split("\n")
       val (first5Lines, rest) = sourceLines.splitAt(6)
@@ -143,7 +149,7 @@ class MinimalTests {
         "message_type" -> "load_data"
       )
 
-      HttpUtils.postJson(loadRequest, "localhost", 8888, timeoutSeconds = 120)
+      HttpUtils.postJson(client, loadRequest, "localhost", 8888, timeoutSeconds = 120)
 
       // Create JSON request
       val jsonRequest = Json.obj(
@@ -152,11 +158,6 @@ class MinimalTests {
       )
 
       val jsonString = jsonRequest.toString()
-
-      // Create HTTP client and request
-      val client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build()
 
       val request = HttpRequest.newBuilder()
         .uri(URI.create(s"http://$serverHost:$serverPort"))

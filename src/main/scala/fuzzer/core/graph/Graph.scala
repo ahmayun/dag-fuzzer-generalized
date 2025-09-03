@@ -105,4 +105,90 @@ case class Graph[T](
     newGraph
   }
 
+  def toDebugString: String = {
+    val sb = new StringBuilder()
+
+    sb.append("=" * 60).append("\n")
+    sb.append(s"GRAPH DEBUG - ${nodes.length} nodes total\n")
+    sb.append("=" * 60).append("\n")
+
+    // Print basic stats
+    sb.append(s"Sources: ${getSourceNodes.length}\n")
+    sb.append(s"Sinks: ${getSinkNodes.length}\n")
+    sb.append("\n")
+
+    // Print nodesMap
+    sb.append("NODES MAP:\n")
+    sb.append("-" * 30).append("\n")
+    nodesMap.toSeq.sortBy(_._1).foreach { case (id, node) =>
+      sb.append(s"  $id -> Node(id='${node.id}', value=${node.value})\n")
+    }
+    sb.append("\n")
+
+    // Print children map
+    sb.append("CHILDREN MAP:\n")
+    sb.append("-" * 30).append("\n")
+    children.toSeq.sortBy(_._1).foreach { case (nodeId, childIds) =>
+      val childrenStr = if (childIds.isEmpty) "[]" else childIds.mkString("[", ", ", "]")
+      sb.append(s"  $nodeId -> $childrenStr\n")
+    }
+    sb.append("\n")
+
+    // Print parents map
+    sb.append("PARENTS MAP:\n")
+    sb.append("-" * 30).append("\n")
+    parents.toSeq.sortBy(_._1).foreach { case (nodeId, parentIds) =>
+      val parentsStr = if (parentIds.isEmpty) "[]" else parentIds.mkString("[", ", ", "]")
+      sb.append(s"  $nodeId -> $parentsStr\n")
+    }
+    sb.append("\n")
+
+    // Print node details with relationships
+    sb.append("NODE DETAILS:\n")
+    sb.append("-" * 30).append("\n")
+    nodes.sortBy(_.id).foreach { node =>
+      val parentIds = node.parents.map(_.id).mkString("[", ", ", "]")
+      val childIds = node.children.map(_.id).mkString("[", ", ", "]")
+      val nodeType = if (node.parents.isEmpty) "SOURCE"
+      else if (node.children.isEmpty) "SINK"
+      else "INTERNAL"
+
+      sb.append(s"  ${node.id} (${node.value}) - $nodeType\n")
+      sb.append(s"    Parents: $parentIds (in-degree: ${node.getInDegree})\n")
+      sb.append(s"    Children: $childIds (out-degree: ${node.getOutDegree})\n")
+    }
+    sb.append("\n")
+
+    // Print tree structure visualization
+    sb.append("TREE STRUCTURE (from sinks up to sources):\n")
+    sb.append("-" * 30).append("\n")
+
+    def appendTreeFromNode(node: Node[T], indent: String, visited: mutable.Set[String]): Unit = {
+      if (!visited.contains(node.id)) {
+        visited.add(node.id)
+        val nodeType = if (node.parents.isEmpty) "[SOURCE]"
+        else if (node.children.isEmpty) "[SINK]"
+        else ""
+        sb.append(s"$indent${node.id} (${node.value}) $nodeType\n")
+
+        // Print parents with increased indent
+        node.parents.foreach { parent =>
+          appendTreeFromNode(parent, indent + "  ↑ ", visited)
+        }
+      } else {
+        // Already visited - just show reference
+        sb.append(s"$indent${node.id} (${node.value}) [ALREADY SHOWN]\n")
+      }
+    }
+
+    val visited = mutable.Set[String]()
+    getSinkNodes.foreach { sink =>
+      appendTreeFromNode(sink, "", visited)
+      sb.append("\n")
+    }
+
+    sb.append("=" * 60)
+    sb.toString()
+  }
+
 }

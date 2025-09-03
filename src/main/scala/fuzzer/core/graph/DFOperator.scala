@@ -27,4 +27,8 @@ object DFOperator {
     )
   }
 
+  def fromInt(id: Int): DFOperator = {
+    new DFOperator(id=id)
+  }
+
 }

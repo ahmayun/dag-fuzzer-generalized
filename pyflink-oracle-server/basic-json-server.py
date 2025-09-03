@@ -219,8 +219,8 @@ from pyflink.table import expressions as expr
         stdout_capture = StringIO()
         stderr_capture = StringIO()
 
-        error_name = None
-        error_msg = None
+        error_name = ""
+        error_msg = ""
 
         full_code = received_code
 #         full_code = self.add_imports(received_code)
@@ -248,7 +248,7 @@ from pyflink.table import expressions as expr
                     # Try to execute as statements first
                     exec(full_code, namespace, namespace)
                     success = True
-                    error_msg = None
+                    error_msg = ""
                 except Exception as e:
                     success = False
                     error_name = self.extract_error_name(e)

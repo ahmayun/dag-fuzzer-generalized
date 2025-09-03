@@ -6,14 +6,14 @@ import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DAGParser, DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter}
 import fuzzer.data.tables.TableMetadata
+import fuzzer.utils.generation.dag.DAGGenUtils.generateRandomInvertedBinaryTreeDAG
 import fuzzer.utils.io.ReadWriteUtils.{prettyPrintStats, writeLiveStats}
 import fuzzer.utils.random.Random
 import org.yaml.snakeyaml.Yaml
 import play.api.libs.json.{JsObject, JsValue}
 
+import scala.collection.mutable
 import java.io.{File, FileWriter}
-import scala.jdk.CollectionConverters._
-import scala.sys.process._
 import scala.util.control.Breaks.{break, breakable}
 
 class FuzzerEngine(
@@ -23,13 +23,6 @@ class FuzzerEngine(
                     val codeGenerator: CodeGenerator,
                     val codeExecutor: CodeExecutor
                   ) {
-
-
-  def generateSingleDAG(): Graph[DFOperator] = {
-    val dagYamlFile = generateYamlFiles(1).head
-    DAGParser.parseYamlFile(dagYamlFile.getAbsolutePath, map => DFOperator.fromMap(map))
-  }
-
 
 
   def pickRandomSource(opMap: Map[String, Seq[String]]): Option[String] = {
@@ -136,6 +129,29 @@ class FuzzerEngine(
     generatedSource
   }
 
+
+  private def createDAGIteratorInternal(config: FuzzerConfig): Iterator[(Graph[DFOperator], String)] = {
+    new Iterator[(Graph[DFOperator], String)] {
+      var counter: Int = -1
+      override def hasNext: Boolean = true
+
+      override def next(): (Graph[DFOperator], String) = {
+        counter += 1
+        (
+          generateRandomInvertedBinaryTreeDAG(
+            valueGenerator = DFOperator.fromInt,
+            maxDepth = Random.nextIntInclusiveRange(3, 7)
+          ), s"dag_$counter")
+      }
+    }
+  }
+
+  private def createDAGGenerator(config: FuzzerConfig): Iterator[(Graph[DFOperator], String)] = {
+    // Uncomment this to use external dag generator
+    // generateYamlFilesInfinite(config.d)
+    createDAGIteratorInternal(config)
+  }
+
   def run(): FuzzerResults = {
     val stats = new CampaignStats()
     stats.setSeed(config.seed)
@@ -158,14 +174,10 @@ class FuzzerEngine(
 
     try {
       // Main fuzzing loop
+      val dagIterator = createDAGGenerator(config)
       while (!shouldStop) {
-        val dagYamlFiles = generateYamlFiles(config.d)
-
-        for (dagYamlFile <- dagYamlFiles if !shouldStop) {
-
-          println(s"Processing ${dagYamlFile.getName}")
-          processSingleDAG(dagYamlFile, stats, shouldStop, startTime)
-        }
+        val (dag, dagName) = dagIterator.next()
+        processSingleDAG(dag, dagName, stats, shouldStop, startTime)
       }
 
       // Return final results
@@ -179,59 +191,6 @@ class FuzzerEngine(
     }
   }
 
-  def genTempConfigWithNewSeed(yamlFile: String): String = {
-    val yaml = new Yaml()
-    val newSeed = Random.nextInt(Int.MaxValue)
-    val inputStream = new java.io.FileInputStream(new File(yamlFile))
-    val data = yaml.load[java.util.Map[String, Object]](inputStream).asScala
-    data.update("Seed", Integer.valueOf(newSeed))
-    val outputPath = "/tmp/runtime-config.yaml"
-    val writer = new FileWriter(outputPath)
-    yaml.dump(data.asJava, writer)
-    writer.close()
-    outputPath
-  }
-
-  def updateConfigProperty(configFile: String, propName: String, propValue: Int): Unit = {
-    val yaml = new Yaml()
-    val inputStream = new java.io.FileInputStream(new File(configFile))
-    val data = yaml.load[java.util.Map[String, Object]](inputStream).asScala
-    data.update(propName, Integer.valueOf(propValue))
-    val outputPath = "/tmp/runtime-config.yaml"
-    val writer = new FileWriter(outputPath)
-    yaml.dump(data.asJava, writer)
-    writer.close()
-  }
-
-  def generateDAGFolder(n: Int): File = {
-    val newConfig = genTempConfigWithNewSeed("dag-gen/sample_config/dfg-config.yaml")
-    updateConfigProperty(newConfig, "Number of DAGs", n)
-    val generateCmd = s"./dag-gen/venv/bin/python dag-gen/run_generator.py -c ${newConfig}" // dag-gen/sample_config/dfg-config.yaml
-    val exitCode = generateCmd.!
-    if (exitCode != 0) {
-      println(s"Warning: DAG generation command failed with exit code $exitCode")
-      sys.exit(-1)
-    }
-
-    val dagFolder = new File(config.dagGenDir)
-    if (!dagFolder.exists() || !dagFolder.isDirectory) {
-      println("Warning: 'DAGs' folder not found or not a directory. Exiting.")
-      sys.exit(-1)
-    }
-    dagFolder
-  }
-
-  def generateYamlFiles(n: Int): Array[File] = {
-
-    val dagFolder = generateDAGFolder(n)
-
-    val yamlFiles = dagFolder
-      .listFiles()
-      .filter(f => f.isFile && f.getName.startsWith("dag") && f.getName.endsWith(".yaml"))
-      .take(config.d)
-
-    yamlFiles
-  }
 
   def isInvalidDFG(dag: Graph[DFOperator]): (Boolean, String) = {
     dag match {
@@ -247,10 +206,7 @@ class FuzzerEngine(
 
   }
 
-  private def processSingleDAG(dagYamlFile: File, stats: CampaignStats, shouldStop: => Boolean, startTime: Long): Unit = {
-    val dag = DAGParser.parseYamlFile(dagYamlFile.getAbsolutePath, map => DFOperator.fromMap(map))
-    val dagName = dagYamlFile.getName
-
+  private def processSingleDAG(dag: Graph[DFOperator], dagName: String, stats: CampaignStats, shouldStop: => Boolean, startTime: Long): Unit = {
     try {
       val (isInvalid, message) = isInvalidDFG(dag)
       if (isInvalid) {

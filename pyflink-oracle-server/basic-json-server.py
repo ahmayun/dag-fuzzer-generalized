@@ -81,106 +81,185 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
     def discover_tpcds_tables(self):
         """Discover all TPCDS tables from the CSV data directory"""
+        if not self._validate_data_path():
+            return {}
+
+        discovered_items = self._get_directory_items()
         tables = {}
 
-        if not os.path.exists(GLOBAL_STATE.tpcds_data_path):
-            print(f"Warning: TPCDS data path '{GLOBAL_STATE.tpcds_data_path}' does not exist")
-            return tables
+        for item in discovered_items:
+            table_path = self._build_table_path(item)
 
-        # Get all subdirectories (table names)
-        for item in os.listdir(GLOBAL_STATE.tpcds_data_path):
-            table_path = os.path.join(GLOBAL_STATE.tpcds_data_path, item)
-            if os.path.isdir(table_path):
-                # Check if directory contains CSV files
-                csv_files = glob.glob(os.path.join(table_path, "*.csv"))
-                if csv_files:
-                    # Use absolute path for the table
+            if self._is_valid_table_directory(table_path):
+                if self._has_schema_definition(item):
                     tables[item] = os.path.abspath(table_path)
-                    print(f"Found TPCDS table: {item} -> {tables[item]}")
-
-                    # Check if we have schema for this table
-                    if item not in GLOBAL_STATE.table_schemas:
-                        print(f"Warning: No schema defined for table '{item}'. Skipping.")
-                        del tables[item]
+                    self._log_table_found(item, tables[item])
+                else:
+                    self._log_missing_schema_warning(item)
 
         return tables
 
+    def _validate_data_path(self):
+        """Check if the TPCDS data path exists"""
+        if not os.path.exists(GLOBAL_STATE.tpcds_data_path):
+            print(f"Warning: TPCDS data path '{GLOBAL_STATE.tpcds_data_path}' does not exist")
+            return False
+        return True
+
+    def _get_directory_items(self):
+        """Get all items from the TPCDS data directory"""
+        return os.listdir(GLOBAL_STATE.tpcds_data_path)
+
+    def _build_table_path(self, item):
+        """Build the full path for a table directory"""
+        return os.path.join(GLOBAL_STATE.tpcds_data_path, item)
+
+    def _is_valid_table_directory(self, table_path):
+        """Check if path is a directory containing CSV files"""
+        if not os.path.isdir(table_path):
+            return False
+
+        return self._contains_csv_files(table_path)
+
+    def _contains_csv_files(self, table_path):
+        """Check if directory contains any CSV files"""
+        csv_files = glob.glob(os.path.join(table_path, "*.csv"))
+        return len(csv_files) > 0
+
+    def _has_schema_definition(self, table_name):
+        """Check if schema is defined for the table"""
+        return table_name in GLOBAL_STATE.table_schemas
+
+    def _log_table_found(self, table_name, table_path):
+        """Log when a valid table is discovered"""
+        print(f"Found TPCDS table: {table_name} -> {table_path}")
+
+    def _log_missing_schema_warning(self, table_name):
+        """Log warning when table has no schema definition"""
+        print(f"Warning: No schema defined for table '{table_name}'. Skipping.")
+
     def setup_flink_environment(self):
-        global GLOBAL_STATE
         """Setup the Flink environment once with all TPCDS CSV tables"""
+        self._log_setup_start()
+
+        try:
+            tables = self._discover_and_log_tables()
+            table_env = self._create_table_environment()
+            self._register_all_tables(table_env, tables)
+            self._verify_all_tables(table_env, tables)
+
+            namespace = self._build_namespace(table_env)
+            self._log_setup_success()
+            return namespace
+
+        except Exception as e:
+            self._log_setup_failure(e)
+            return None
+
+    def _log_setup_start(self):
+        """Log environment setup initialization"""
         print(f"[{datetime.now()}] Setting up Flink environment...")
         print(f"[{datetime.now()}] Python executable: {sys.executable}")
         print(f"[{datetime.now()}] TPCDS data path: {GLOBAL_STATE.tpcds_data_path}")
 
-        # Discover tables
+    def _discover_and_log_tables(self):
+        """Discover TPCDS tables and log the results"""
         tables = self.discover_tpcds_tables()
         print(f"[{datetime.now()}] Discovered {len(tables)} TPCDS tables: {list(tables.keys())}")
+        return tables
 
-        # Create the Flink environment
+    def _create_table_environment(self):
+        """Create and return a Flink table environment"""
+        from pyflink.table import EnvironmentSettings, TableEnvironment
+
+        env_settings = EnvironmentSettings.in_batch_mode()
+        return TableEnvironment.create(env_settings)
+
+    def _register_all_tables(self, table_env, tables):
+        """Register all discovered tables with the table environment"""
+        for table_name, table_path in tables.items():
+            self._register_single_table(table_env, table_name, table_path)
+
+    def _register_single_table(self, table_env, table_name, table_path):
+        """Register a single table with the Flink environment"""
+        print(f"[{datetime.now()}] Registering table: {table_name}")
+
+        create_table_sql = self._build_create_table_sql(table_name, table_path)
+        table_env.execute_sql(create_table_sql)
+
+    def _build_create_table_sql(self, table_name, table_path):
+        """Build the CREATE TABLE SQL statement for a given table"""
+        schema_def = ', '.join(GLOBAL_STATE.table_schemas[table_name])
+
+        return f"""
+        CREATE TEMPORARY TABLE {table_name} (
+            {schema_def}
+        ) WITH (
+            'connector' = 'filesystem',
+            'path' = '{table_path}',
+            'format' = 'csv',
+            'csv.field-delimiter' = ',',
+            'csv.ignore-first-line' = 'true',
+            'csv.allow-comments' = 'false',
+            'csv.ignore-parse-errors' = 'true'
+        )
+        """
+
+    def _verify_all_tables(self, table_env, tables):
+        """Verify all registered tables are working correctly"""
+        print(f"[{datetime.now()}] Verifying TPCDS tables...")
+
+        for table_name in tables.keys():
+            self._verify_single_table(table_env, table_name)
+
+        print(f"[{datetime.now()}] Table verification complete.")
+
+    def _verify_single_table(self, table_env, table_name):
+        """Verify a single table by checking row count and schema"""
         try:
-            from pyflink.table import EnvironmentSettings, TableEnvironment
+            print(f"[{datetime.now()}] Testing table: {table_name}")
 
-            # Create environment
-            env_settings = EnvironmentSettings.in_batch_mode()
-            table_env = TableEnvironment.create(env_settings)
+            row_count = self._get_table_row_count(table_env, table_name)
+            print(f"[{datetime.now()}]   {table_name}: {row_count} rows")
 
-            # Register all tables with their schemas
-            for table_name, table_path in tables.items():
-                print(f"[{datetime.now()}] Registering table: {table_name}")
-
-                # Get schema for this table
-                schema_def = ', '.join(GLOBAL_STATE.table_schemas[table_name])
-
-                # Create table with explicit schema
-                create_table_sql = f"""
-                CREATE TEMPORARY TABLE {table_name} (
-                    {schema_def}
-                ) WITH (
-                    'connector' = 'filesystem',
-                    'path' = '{table_path}',
-                    'format' = 'csv',
-                    'csv.field-delimiter' = ',',
-                    'csv.ignore-first-line' = 'true',
-                    'csv.allow-comments' = 'false',
-                    'csv.ignore-parse-errors' = 'true'
-                )
-                """
-
-                table_env.execute_sql(create_table_sql)
-
-            print(f"[{datetime.now()}] Verifying TPCDS tables...")
-            for table_name in tables.keys():
-                try:
-                    print(f"[{datetime.now()}] Testing table: {table_name}")
-                    result = table_env.sql_query(f"SELECT COUNT(*) as row_count FROM {table_name}")
-                    count_result = result.execute().collect()
-                    row_count = list(count_result)[0][0]
-                    print(f"[{datetime.now()}]   {table_name}: {row_count} rows")
-
-                    # Show schema
-                    schema_result = table_env.sql_query(f"SELECT * FROM {table_name} LIMIT 1")
-                    schema_names = schema_result.get_schema().get_field_names()
-                    print(f"[{datetime.now()}]   {table_name} columns: {schema_names[:5]}{'...' if len(schema_names) > 5 else ''}")
-
-                except Exception as e:
-                    print(f"[{datetime.now()}]   ERROR with {table_name}: {e}")
-
-            print(f"[{datetime.now()}] Table verification complete.")
-
-            # Create namespace with Flink objects
-            namespace = {
-                'table_env': table_env,
-                'EnvironmentSettings': EnvironmentSettings,
-                'TableEnvironment': TableEnvironment,
-            }
-
-            print(f"[{datetime.now()}] Flink environment setup successful!")
-            return namespace
+            self._log_table_schema(table_env, table_name)
 
         except Exception as e:
-            print(f"[{datetime.now()}] Failed to setup Flink environment: {str(e)}")
-            print(f"[{datetime.now()}] {traceback.format_exc()}")
-            return None
+            print(f"[{datetime.now()}]   ERROR with {table_name}: {e}")
+
+    def _get_table_row_count(self, table_env, table_name):
+        """Get the row count for a specific table"""
+        result = table_env.sql_query(f"SELECT COUNT(*) as row_count FROM {table_name}")
+        count_result = result.execute().collect()
+        return list(count_result)[0][0]
+
+    def _log_table_schema(self, table_env, table_name):
+        """Log the schema information for a table"""
+        schema_result = table_env.sql_query(f"SELECT * FROM {table_name} LIMIT 1")
+        schema_names = schema_result.get_schema().get_field_names()
+
+        display_columns = schema_names[:5]
+        suffix = '...' if len(schema_names) > 5 else ''
+        print(f"[{datetime.now()}]   {table_name} columns: {display_columns}{suffix}")
+
+    def _build_namespace(self, table_env):
+        """Build the namespace dictionary with Flink objects"""
+        from pyflink.table import EnvironmentSettings, TableEnvironment
+
+        return {
+            'table_env': table_env,
+            'EnvironmentSettings': EnvironmentSettings,
+            'TableEnvironment': TableEnvironment,
+        }
+
+    def _log_setup_success(self):
+        """Log successful environment setup"""
+        print(f"[{datetime.now()}] Flink environment setup successful!")
+
+    def _log_setup_failure(self, error):
+        """Log environment setup failure"""
+        print(f"[{datetime.now()}] Failed to setup Flink environment: {str(error)}")
+        print(f"[{datetime.now()}] {traceback.format_exc()}")
 
     def setup_flink_namespace(self):
         global GLOBAL_STATE
@@ -191,14 +270,12 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         # Return a copy of the namespace for this execution
         return dict(GLOBAL_STATE.flink_namespace), None
 
-
     def add_imports(self, received_code):
-        return f"""
-from pyflink.table.expressions import col, lit
-from pyflink.table import expressions as expr
-
-{received_code}
-"""
+        return "\n".join([
+            "from pyflink.table.expressions import col, lit",
+            "from pyflink.table import expressions as expr",
+            received_code
+        ])
 
     def extract_error_name(self, e):
         if hasattr(e, 'java_exception'):
@@ -216,144 +293,229 @@ from pyflink.table import expressions as expr
 
     def execute_flink_code(self, received_code):
         """Execute the received code in the pre-initialized Flink namespace"""
-        stdout_capture = StringIO()
-        stderr_capture = StringIO()
+        stdout_capture, stderr_capture = self._create_output_captures()
 
-        error_name = ""
-        error_msg = ""
-
-        full_code = received_code
-#         full_code = self.add_imports(received_code)
         try:
-            # Get the pre-initialized namespace
-            namespace, setup_error = self.setup_flink_namespace()
+            namespace = self._setup_execution_namespace()
+            if namespace is None:
+                return self._create_setup_error_result()
 
-            if setup_error:
-                print(f"[{datetime.now()}] Setup error occurred:")
-                print(setup_error)
-                return {
-                    'stdout': '',
-                    'stderr': setup_error,
-                    'return_code': -1,
-                    'success': False,
-                    'error_message': error_msg,
-                    'error_name': error_name,
-                    'final_program': ""
-                }
-
-            # Execute the received code in the namespace with output capture
-            print(f"[{datetime.now()}] Executing received code...")
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                try:
-                    # Try to execute as statements first
-                    exec(full_code, namespace, namespace)
-                    success = True
-                    error_msg = ""
-                except Exception as e:
-                    success = False
-                    error_name = self.extract_error_name(e)
-                    error_msg = f"{str(e)}\n{traceback.format_exc()}"
-
-            stdout_output = stdout_capture.getvalue()
-            stderr_output = stderr_capture.getvalue()
-
-            # Add any execution error to stderr
-            if error_msg:
-                stderr_output += error_msg
-
-            print(f"[{datetime.now()}] Code execution completed. Success: {success}")
-
-            if stdout_output:
-                print(f"[{datetime.now()}] STDOUT:")
-                print("-" * 40)
-                print(stdout_output)
-                print("-" * 40)
-            else:
-                print(f"[{datetime.now()}] No stdout output")
-
-            if stderr_output:
-                print(f"[{datetime.now()}] STDERR:")
-                print("-" * 40)
-                print(stderr_output)
-                print("-" * 40)
-            else:
-                print(f"[{datetime.now()}] No stderr output")
-
-            return {
-                'stdout': stdout_output,
-                'stderr': stderr_output,
-                'return_code': 0 if success else 1,
-                'success': success,
-                'error_message': error_msg,
-                'error_name': error_name,
-                'final_program': full_code
-            }
+            execution_result = self._execute_code_with_capture(received_code, namespace,
+                                                              stdout_capture, stderr_capture)
+            self._log_execution_outputs(execution_result)
+            return execution_result
 
         except Exception as e:
-            error_msg = f"Critical error during execution: {str(e)}\n{traceback.format_exc()}"
-            print(f"[{datetime.now()}] CRITICAL ERROR:")
-            print("-" * 50)
-            print(error_msg)
-            print("-" * 50)
-            return {
-                'stdout': stdout_capture.getvalue(),
-                'stderr': error_msg,
-                'return_code': -1,
-                'success': False,
-                'namespace': None,
-                'error_name': error_name
-            }
+            return self._handle_critical_error(e, stdout_capture)
+
+    def _create_output_captures(self):
+        """Create StringIO objects for capturing stdout and stderr"""
+        return StringIO(), StringIO()
+
+    def _setup_execution_namespace(self):
+        """Setup and validate Flink namespace"""
+        namespace, setup_error = self.setup_flink_namespace()
+
+        if setup_error:
+            self._log_setup_error(setup_error)
+            return None
+
+        return namespace
+
+    def _log_setup_error(self, setup_error):
+        """Log namespace setup errors"""
+        print(f"[{datetime.now()}] Setup error occurred:")
+        print(setup_error)
+
+    def _create_setup_error_result(self):
+        """Create result dictionary for setup errors"""
+        return {
+            'stdout': '',
+            'stderr': 'Namespace setup failed',
+            'return_code': -1,
+            'success': False,
+            'error_message': '',
+            'error_name': '',
+            'final_program': ""
+        }
+
+    def _execute_code_with_capture(self, code, namespace, stdout_capture, stderr_capture):
+        """Execute code with output capture and error handling"""
+        print(f"[{datetime.now()}] Executing received code...")
+
+        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+            success, error_name, error_msg = self._try_execute_code(code, namespace)
+
+        return self._build_execution_result(code, stdout_capture, stderr_capture,
+                                          success, error_name, error_msg)
+
+    def _try_execute_code(self, code, namespace):
+        """Attempt code execution and capture any errors"""
+        try:
+            exec(code, namespace, namespace)
+            return True, "", ""
+        except Exception as e:
+            error_name = self.extract_error_name(e)
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            return False, error_name, error_msg
+
+    def _build_execution_result(self, code, stdout_capture, stderr_capture,
+                              success, error_name, error_msg):
+        """Build the execution result dictionary"""
+        stdout_output = stdout_capture.getvalue()
+        stderr_output = self._combine_stderr_outputs(stderr_capture.getvalue(), error_msg)
+
+        print(f"[{datetime.now()}] Code execution completed. Success: {success}")
+
+        return {
+            'stdout': stdout_output,
+            'stderr': stderr_output,
+            'return_code': 0 if success else 1,
+            'success': success,
+            'error_message': error_msg,
+            'error_name': error_name,
+            'final_program': code
+        }
+
+    def _combine_stderr_outputs(self, stderr_output, error_msg):
+        """Combine stderr capture with execution error messages"""
+        if error_msg:
+            return stderr_output + error_msg
+        return stderr_output
+
+    def _log_execution_outputs(self, result):
+        """Log stdout and stderr outputs from execution"""
+        self._log_stdout_output(result['stdout'])
+        self._log_stderr_output(result['stderr'])
+
+    def _log_stdout_output(self, stdout_output):
+        """Log stdout output if present"""
+        if stdout_output:
+            print(f"[{datetime.now()}] STDOUT:")
+            print("-" * 40)
+            print(stdout_output)
+            print("-" * 40)
+        else:
+            print(f"[{datetime.now()}] No stdout output")
+
+    def _log_stderr_output(self, stderr_output):
+        """Log stderr output if present"""
+        if stderr_output:
+            print(f"[{datetime.now()}] STDERR:")
+            print("-" * 40)
+            print(stderr_output)
+            print("-" * 40)
+        else:
+            print(f"[{datetime.now()}] No stderr output")
+
+    def _handle_critical_error(self, error, stdout_capture):
+        """Handle critical execution errors"""
+        error_msg = f"Critical error during execution: {str(error)}\n{traceback.format_exc()}"
+        self._log_critical_error(error_msg)
+
+        return {
+            'stdout': stdout_capture.getvalue(),
+            'stderr': error_msg,
+            'return_code': -1,
+            'success': False,
+            'namespace': None,
+            'error_name': ''
+        }
+
+    def _log_critical_error(self, error_msg):
+        """Log critical errors with formatted output"""
+        print(f"[{datetime.now()}] CRITICAL ERROR:")
+        print("-" * 50)
+        print(error_msg)
+        print("-" * 50)
 
     def handle_execute_code(self, request_dict):
-        global GLOBAL_STATE
         """Handle individual client connections"""
-        print(f"[{datetime.now()}] Running handle_execute_code()...")
-        data = request_dict['code']
-        response_dict = {}
+        self._log_handler_start()
+        code = self._extract_code_from_request(request_dict)
+
         try:
             program_number = self.get_next_program_number()
+            self._log_program_received(program_number, code)
 
-            print(f"\n{'='*60}")
-            print(f"PROGRAM #{program_number} RECEIVED")
-            print(f"Length: {len(data)} characters")
-            print(f"{'='*60}")
-            print(data)
-            print(f"{'='*60}")
+            execution_result = self._execute_and_process(program_number, code)
+            self._log_execution_results(program_number, execution_result)
 
-            # Execute the received code with the Flink template
-            print(f"[{datetime.now()}] Executing program #{program_number} with Flink template...")
-            execution_result = self.execute_flink_code(data)
-
-            # Store results with namespace access
-            stdout_output = execution_result['stdout']
-            stderr_output = execution_result['stderr']
-            return_code = execution_result['return_code']
-            success = execution_result['success']
-            namespace = execution_result.get('namespace', {})
-
-            # Save logs to disk
-            self.save_program_logs(program_number, data, stdout_output, stderr_output)
-
-            # You can now access Flink objects from the namespace if needed
-            # For example: table_env = namespace.get('table_env')
-
-            print(f"\n{'='*60}")
-            print(f"EXECUTION RESULTS FOR PROGRAM #{program_number}")
-            print(f"Success: {success}")
-            print(f"Return Code: {return_code}")
-            print(f"Logs saved to: {os.path.join(GLOBAL_STATE.log_dir, str(program_number))}")
-            if stderr_output:
-                print(f"Error Details:")
-                print("-" * 30)
-                print(stderr_output)
-                print("-" * 30)
-            print(f"Available variables in namespace: {list(namespace.keys()) if namespace else 'None'}")
-            print(f"{'='*60}\n")
-            response_dict = execution_result
+            return execution_result
         except Exception as e:
-            print(f"[{datetime.now()}] Error handling client {e}")
+            self._log_handler_error(e)
+            return {}
 
-        return response_dict
+    def _log_handler_start(self):
+        """Log the start of code execution handler"""
+        print(f"[{datetime.now()}] Running handle_execute_code()...")
+
+    def _extract_code_from_request(self, request_dict):
+        """Extract code data from request dictionary"""
+        return request_dict['code']
+
+    def _log_program_received(self, program_number, code):
+        """Log details of received program"""
+        print(f"\n{'='*60}")
+        print(f"PROGRAM #{program_number} RECEIVED")
+        print(f"Length: {len(code)} characters")
+        print(f"{'='*60}")
+        print(code)
+        print(f"{'='*60}")
+
+    def _execute_and_process(self, program_number, code):
+        """Execute code and process results"""
+        print(f"[{datetime.now()}] Executing program #{program_number} with Flink template...")
+        execution_result = self.execute_flink_code(code)
+        self._save_execution_logs(program_number, code, execution_result)
+        return execution_result
+
+    def _save_execution_logs(self, program_number, code, execution_result):
+        """Save program execution logs to disk"""
+        stdout_output = execution_result['stdout']
+        stderr_output = execution_result['stderr']
+        self.save_program_logs(program_number, code, stdout_output, stderr_output)
+
+    def _log_execution_results(self, program_number, execution_result):
+        """Log detailed execution results"""
+        success = execution_result['success']
+        return_code = execution_result['return_code']
+        stderr_output = execution_result['stderr']
+        namespace = execution_result.get('namespace', {})
+
+        self._print_results_header(program_number, success, return_code)
+        self._print_error_details(stderr_output)
+        self._print_namespace_info(namespace)
+        self._print_results_footer()
+
+    def _print_results_header(self, program_number, success, return_code):
+        """Print execution results header"""
+        print(f"\n{'='*60}")
+        print(f"EXECUTION RESULTS FOR PROGRAM #{program_number}")
+        print(f"Success: {success}")
+        print(f"Return Code: {return_code}")
+        print(f"Logs saved to: {os.path.join(GLOBAL_STATE.log_dir, str(program_number))}")
+
+    def _print_error_details(self, stderr_output):
+        """Print error details if present"""
+        if stderr_output:
+            print(f"Error Details:")
+            print("-" * 30)
+            print(stderr_output)
+            print("-" * 30)
+
+    def _print_namespace_info(self, namespace):
+        """Print available namespace variables"""
+        available_vars = list(namespace.keys()) if namespace else 'None'
+        print(f"Available variables in namespace: {available_vars}")
+
+    def _print_results_footer(self):
+        """Print execution results footer"""
+        print(f"{'='*60}\n")
+
+    def _log_handler_error(self, error):
+        """Log handler execution error"""
+        print(f"[{datetime.now()}] Error handling client {error}")
 
     def do_POST(self):
         try:
@@ -391,82 +553,117 @@ from pyflink.table import expressions as expr
         return data
 
     def convert_schema_format(self, input_dict):
-        def parse_data_type(type_str):
-            """Parse data type string and return standardized type"""
-            type_str = type_str.upper()
-
-            if 'INT' in type_str:
-                return 'integer'
-            elif 'STRING' in type_str or 'VARCHAR' in type_str or 'CHAR' in type_str:
-                return 'string'
-            elif 'DECIMAL' in type_str or 'NUMERIC' in type_str or 'FLOAT' in type_str:
-                return 'decimal'
-            elif 'DATE' in type_str or 'TIMESTAMP' in type_str:
-                return 'date'
-            elif 'BOOL' in type_str:
-                return 'boolean'
-            else:
-                return 'string'  # Default fallback
-
-        def is_key_column(column_name):
-            """Determine if a column is likely a key based on naming patterns"""
-            name_lower = column_name.lower()
-            # Common key patterns
-            key_patterns = ['_id', '_sk', '_key', 'id_', 'key_']
-            return any(pattern in name_lower for pattern in key_patterns) or name_lower == 'id'
-
-        def is_nullable_column(column_name, data_type):
-            """Determine if a column should be nullable based on patterns"""
-            name_lower = column_name.lower()
-
-            # Keys are typically not nullable
-            if is_key_column(column_name):
-                return False
-
-            # Some fields are commonly required
-            required_patterns = ['name', 'type', 'class', 'status']
-            if any(pattern in name_lower for pattern in required_patterns):
-                return False
-
-            # Optional fields are commonly nullable
-            optional_patterns = ['desc', 'description', 'manager', 'suite', 'county']
-            if any(pattern in name_lower for pattern in optional_patterns):
-                return True
-
-            # Default: most fields can be nullable
-            return True
-
+        """Convert schema dictionary to standardized format"""
         result = []
 
         for table_name, columns in input_dict.items():
-            table_schema = {
-                "identifier": table_name,
-                "columns": [],
-                "metadata": {
-                    "source": "database",
-                    "owner": "admin"
-                }
-            }
+            table_schema = self._create_base_table_schema(table_name)
 
             for column_def in columns:
-                # Split column definition into name and type
-                parts = column_def.split()
-                if len(parts) >= 2:
-                    column_name = parts[0]
-                    data_type_raw = ' '.join(parts[1:])  # Handle types like "DECIMAL(5,2)"
-
-                    column_schema = {
-                        "name": column_name,
-                        "dataType": parse_data_type(data_type_raw),
-                        "isNullable": is_nullable_column(column_name, data_type_raw),
-                        "isKey": is_key_column(column_name)
-                    }
-
+                column_schema = self._process_column_definition(column_def)
+                if column_schema:
                     table_schema["columns"].append(column_schema)
 
             result.append(table_schema)
 
         return result
+
+    def _create_base_table_schema(self, table_name):
+        """Create base table schema structure"""
+        return {
+            "identifier": table_name,
+            "columns": [],
+            "metadata": {
+                "source": "database",
+                "owner": "admin"
+            }
+        }
+
+    def _process_column_definition(self, column_def):
+        """Process a single column definition string"""
+        parts = column_def.split()
+
+        if len(parts) < 2:
+            return None
+
+        column_name = parts[0]
+        data_type_raw = ' '.join(parts[1:])
+
+        return self._create_column_schema(column_name, data_type_raw)
+
+    def _create_column_schema(self, column_name, data_type_raw):
+        """Create column schema with all attributes"""
+        return {
+            "name": column_name,
+            "dataType": self._parse_data_type(data_type_raw),
+            "isNullable": self._is_nullable_column(column_name, data_type_raw),
+            "isKey": self._is_key_column(column_name)
+        }
+
+    def _parse_data_type(self, type_str):
+        """Parse data type string and return standardized type"""
+        type_str = type_str.upper()
+
+        if 'INT' in type_str:
+            return 'integer'
+        elif self._is_string_type(type_str):
+            return 'string'
+        elif self._is_decimal_type(type_str):
+            return 'decimal'
+        elif self._is_date_type(type_str):
+            return 'date'
+        elif 'BOOL' in type_str:
+            return 'boolean'
+        else:
+            return 'string'  # Default fallback
+
+    def _is_string_type(self, type_str):
+        """Check if type represents a string data type"""
+        string_types = ['STRING', 'VARCHAR', 'CHAR']
+        return any(string_type in type_str for string_type in string_types)
+
+    def _is_decimal_type(self, type_str):
+        """Check if type represents a decimal/numeric data type"""
+        decimal_types = ['DECIMAL', 'NUMERIC', 'FLOAT']
+        return any(decimal_type in type_str for decimal_type in decimal_types)
+
+    def _is_date_type(self, type_str):
+        """Check if type represents a date/time data type"""
+        date_types = ['DATE', 'TIMESTAMP']
+        return any(date_type in type_str for date_type in date_types)
+
+    def _is_key_column(self, column_name):
+        """Determine if a column is likely a key based on naming patterns"""
+        name_lower = column_name.lower()
+        key_patterns = ['_id', '_sk', '_key', 'id_', 'key_']
+
+        return (any(pattern in name_lower for pattern in key_patterns) or
+                name_lower == 'id')
+
+    def _is_nullable_column(self, column_name, data_type):
+        """Determine if a column should be nullable based on patterns"""
+        if self._is_key_column(column_name):
+            return False
+
+        if self._is_required_field(column_name):
+            return False
+
+        if self._is_optional_field(column_name):
+            return True
+
+        return True  # Default: most fields can be nullable
+
+    def _is_required_field(self, column_name):
+        """Check if column name indicates a required field"""
+        name_lower = column_name.lower()
+        required_patterns = ['name', 'type', 'class', 'status']
+        return any(pattern in name_lower for pattern in required_patterns)
+
+    def _is_optional_field(self, column_name):
+        """Check if column name indicates an optional field"""
+        name_lower = column_name.lower()
+        optional_patterns = ['desc', 'description', 'manager', 'suite', 'county']
+        return any(pattern in name_lower for pattern in optional_patterns)
 
     def handle_load_data(self, request_dict: Dict[str, Any]) -> Dict[str, Any]:
         global GLOBAL_STATE
@@ -537,59 +734,3 @@ def run_server(port: int = 8888):
 
 if __name__ == '__main__':
     run_server()
-
-
-"""
-[
-                {
-                    "identifier": "users",
-                    "columns": [
-                        {
-                            "name": "id",
-                            "dataType": "integer",
-                            "isNullable": False,
-                            "isKey": True
-                        },
-                        {
-                            "name": "username",
-                            "dataType": "string",
-                            "isNullable": False,
-                            "isKey": False
-                        },
-                        {
-                            "name": "email",
-                            "dataType": "string",
-                            "isNullable": True,
-                            "isKey": False
-                        }
-                    ],
-                    "metadata": {
-                        "source": "database",
-                        "owner": "admin"
-                    }
-                },
-                {
-                    "identifier": "products",
-                    "columns": [
-                        {
-                            "name": "id",
-                            "dataType": "integer",
-                            "isNullable": False,
-                            "isKey": True
-                        },
-                        {
-                            "name": "name",
-                            "dataType": "string",
-                            "isNullable": False
-                        },
-                        {
-                            "name": "price",
-                            "dataType": "decimal",
-                            "isNullable": True,
-                            "defaultValue": "0.00"
-                        }
-                    ],
-                    "metadata": {}
-                }
-            ]
-"""

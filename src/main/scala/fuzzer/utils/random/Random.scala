@@ -24,5 +24,8 @@ object Random {
   def shuffle[T](xs: Seq[T]): Seq[T] = rng.shuffle(xs)
   def nextGaussian(): Double = rng.nextGaussian()
   def alphanumeric: LazyList[Char] = rng.alphanumeric
+  def choice[T](list: List[T]): T = {
+    list(nextInt(list.length))
+  }
 }
 

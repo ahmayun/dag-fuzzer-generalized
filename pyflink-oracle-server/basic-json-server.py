@@ -12,6 +12,10 @@ import os
 import glob
 import threading
 import json
+from pyflink.common import Configuration
+from pyflink.table import EnvironmentSettings, TableEnvironment, Table
+import re
+import difflib
 
 class GlobalState:
     host = 'localhost'
@@ -29,7 +33,26 @@ class GlobalState:
 
 GLOBAL_STATE = GlobalState()
 
+
+class MultilineJSONEncoder(json.JSONEncoder):
+    def encode(self, obj):
+        # First get the normal JSON representation
+        result = super().encode(obj)
+
+        # Then replace escaped newlines with actual newlines in string values
+        # This regex finds quoted strings containing \n and replaces \n with actual newlines
+        def replace_newlines(match):
+            string_content = match.group(1)
+            # Replace \\n with actual newlines, but be careful about already escaped backslashes
+            formatted = string_content.replace('\\n', '\n')
+            return f'"{formatted}"'
+
+        # Find all quoted strings that contain \n
+        result = re.sub(r'"([^"]*\\n[^"]*)"', replace_newlines, result)
+        return result
+
 class FlinkFuzzingHandler(BaseHTTPRequestHandler):
+# class FlinkFuzzingHandler():
 
     def setup_logging_directory(self, log_dir):
         """Create the server-log directory if it doesn't exist"""
@@ -53,7 +76,7 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         os.makedirs(program_dir, exist_ok=True)
         return program_dir
 
-    def save_program_logs(self, program_number, received_code, stdout_output, stderr_output):
+    def save_program_logs(self, program_number, received_code):
         """Save the program and its outputs to log files"""
         try:
             program_dir = self.create_program_log_directory(program_number)
@@ -62,16 +85,6 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
             program_file = os.path.join(program_dir, 'program.py')
             with open(program_file, 'w', encoding='utf-8') as f:
                 f.write(received_code)
-
-            # Save stdout
-            stdout_file = os.path.join(program_dir, 'stdout.txt')
-            with open(stdout_file, 'w', encoding='utf-8') as f:
-                f.write(stdout_output)
-
-            # Save stderr
-            stderr_file = os.path.join(program_dir, 'stderr.txt')
-            with open(stderr_file, 'w', encoding='utf-8') as f:
-                f.write(stderr_output)
 
             print(f"[{datetime.now()}] Saved logs for program {program_number} to {program_dir}")
             print(f"[{datetime.now()}] Received code saved (without template)")
@@ -144,11 +157,13 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
         try:
             tables = self._discover_and_log_tables()
-            table_env = self._create_table_environment()
-            self._register_all_tables(table_env, tables)
-            self._verify_all_tables(table_env, tables)
+            opt_table_env = self._create_table_environment()
+            unopt_table_env = self._create_unopt_table_env()
+            self._register_all_tables(opt_table_env, tables)
+            self._register_all_tables(unopt_table_env, tables)
+#             self._verify_all_tables(opt_table_env, tables)
 
-            namespace = self._build_namespace(table_env)
+            namespace = self._build_namespace(opt_table_env, unopt_table_env)
             self._log_setup_success()
             return namespace
 
@@ -174,6 +189,110 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
         env_settings = EnvironmentSettings.in_batch_mode()
         return TableEnvironment.create(env_settings)
+
+    def _create_unopt_table_env(self):
+        cfg = Configuration()
+
+        cfg.set_string("table.optimizer.join-reorder-enabled", "false")
+        cfg.set_string("table.optimizer.sql2rel.project-merge.enabled", "false")
+        cfg.set_string("table.optimizer.union-all-as-breakpoint-enabled", "false")
+        cfg.set_string("table.optimizer.incremental-agg-enabled", "false")
+        cfg.set_string("table.optimizer.reuse-sub-plan-enabled", "false")
+        cfg.set_string("table.optimizer.reuse-source-enabled", "false")
+        cfg.set_string("table.optimizer.multiple-input-enabled", "false")
+        cfg.set_string("table.optimizer.runtime-filter.enabled", "false")
+        cfg.set_string("table.optimizer.dynamic-filtering.enabled", "false")
+
+        cfg.set_string("table.optimizer.distinct-agg.split.enabled", "false")
+        cfg.set_string("table.optimizer.local-global-agg-enabled", "false")
+
+#         cfg.set_string("table.optimizer.adaptive-broadcast-join.strategy", "none")
+#         cfg.set_string("table.optimizer.skewed-join-optimization.strategy", "NONE")
+#         cfg.set_string("table.optimizer.broadcast-join.threshold", "-1")
+
+#         cfg.set_string("table.exec.mini-batch.enabled", "false")
+#         cfg.set_string("table.exec.mini-batch.allow-latency", "0 ms")
+#         cfg.set_string("table.exec.mini-batch.size", "-1")
+
+        # Source Push-down Optimizations - Turn OFF
+        cfg.set_string("table.optimizer.source.predicate-pushdown-enabled", "false")
+        cfg.set_string("table.optimizer.source.aggregate-pushdown-enabled", "false")
+        cfg.set_string("table.optimizer.source.partition-pushdown-enabled", "false")
+        cfg.set_string("table.optimizer.source.projection-pushdown-enabled", "false")
+
+        # Window Optimizations - Turn OFF
+        cfg.set_string("table.optimizer.window-agg.enable-incremental-agg", "false")
+        cfg.set_string("table.optimizer.window-join.enable-sliding-window", "false")
+
+        # Code Generation - Turn OFF
+        cfg.set_string("table.exec.compiled.enabled", "false")
+        cfg.set_string("table.exec.codegen.enabled", "false")
+        cfg.set_string("table.exec.codegen.length.max", "1")
+
+        # Spill and Compression - Turn OFF
+        cfg.set_string("table.exec.spill-compression.enabled", "false")
+        cfg.set_string("table.exec.sort.async-merge-enabled", "false")
+
+        # Early/Late Fire - Turn OFF
+        cfg.set_string("table.exec.emit.early-fire.enabled", "false")
+        cfg.set_string("table.exec.emit.late-fire.enabled", "false")
+        cfg.set_string("table.exec.emit.allow-lateness", "0 ms")
+
+        # Advanced Optimizations - Turn OFF
+        cfg.set_string("table.optimizer.cbo-enabled", "false")
+        cfg.set_string("table.optimizer.bushy-join-reorder.enabled", "false")
+        cfg.set_string("table.optimizer.decorrelation-enabled", "false")
+        cfg.set_string("table.optimizer.predicate-pushdown-enabled", "false")
+        cfg.set_string("table.optimizer.project-pushdown-enabled", "false")
+
+        # Parallelism and Resource Optimizations - Turn OFF/Minimize
+        cfg.set_string("table.exec.resource.default-parallelism", "1")
+        cfg.set_string("table.exec.resource.external-shuffle-mode", "ALL_EDGES_BLOCKING")
+
+        # State Optimizations - Turn OFF
+        cfg.set_string("table.exec.state.ttl", "0 ms")
+        cfg.set_string("table.exec.mini-batch.enabled", "false")
+
+        # Sink Optimizations - Turn OFF
+        cfg.set_string("table.exec.sink.upsert-materialize", "NONE")
+        cfg.set_string("table.exec.sink.not-null-enforcer", "ERROR")
+
+        # Watermark Optimizations - Turn OFF
+        cfg.set_string("table.exec.source.idle-timeout", "0 ms")
+
+        # Memory and Buffer Optimizations - Minimize
+        cfg.set_string("table.exec.sort.default-limit", "1")
+        cfg.set_string("table.exec.sort.max-num-file-handles", "1")
+
+        # Legacy Features - Enable (disables new optimizations)
+        cfg.set_string("table.exec.legacy-cast-behaviour", "ENABLED")
+
+        cfg.set_string("table.optimizer.runtime-filter.max-build-data-size", "0")
+
+        # Dynamic Table Options - Turn OFF
+        cfg.set_string("table.dynamic-table-options.enabled", "false")
+
+        # Additional optimizations that might exist - Turn OFF
+        cfg.set_string("table.optimizer.adaptive-join.enabled", "false")
+        cfg.set_string("table.optimizer.bushy-tree-enabled", "false")
+        cfg.set_string("table.optimizer.cbo.stats.enabled", "false")
+        cfg.set_string("table.optimizer.constraint-propagation-enabled", "false")
+        cfg.set_string("table.optimizer.expression-simplification-enabled", "false")
+        cfg.set_string("table.optimizer.filter-pushdown-enabled", "false")
+        cfg.set_string("table.optimizer.limit-pushdown-enabled", "false")
+        cfg.set_string("table.optimizer.partition-pruning-enabled", "false")
+        cfg.set_string("table.optimizer.projection-pushdown-enabled", "false")
+        cfg.set_string("table.optimizer.subquery-decorrelation-enabled", "false")
+        cfg.set_string("table.optimizer.operator-fusion-codegen.enabled", "false")
+
+        settings = (
+            EnvironmentSettings.new_instance()
+            .in_batch_mode()
+            .with_configuration(cfg)
+            .build()
+        )
+
+        return TableEnvironment.create(settings)
 
     def _register_all_tables(self, table_env, tables):
         """Register all discovered tables with the table environment"""
@@ -242,12 +361,13 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         suffix = '...' if len(schema_names) > 5 else ''
         print(f"[{datetime.now()}]   {table_name} columns: {display_columns}{suffix}")
 
-    def _build_namespace(self, table_env):
+    def _build_namespace(self, opt_table_env, unopt_table_env):
         """Build the namespace dictionary with Flink objects"""
         from pyflink.table import EnvironmentSettings, TableEnvironment
 
         return {
-            'table_env': table_env,
+            'opt_table_env': opt_table_env,
+            'unopt_table_env': unopt_table_env,
             'EnvironmentSettings': EnvironmentSettings,
             'TableEnvironment': TableEnvironment,
         }
@@ -270,13 +390,6 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         # Return a copy of the namespace for this execution
         return dict(GLOBAL_STATE.flink_namespace), None
 
-    def add_imports(self, received_code):
-        return "\n".join([
-            "from pyflink.table.expressions import col, lit",
-            "from pyflink.table import expressions as expr",
-            received_code
-        ])
-
     def extract_error_name(self, e):
         if hasattr(e, 'java_exception'):
             # Get the actual Java exception class name
@@ -293,20 +406,18 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
     def execute_flink_code(self, received_code):
         """Execute the received code in the pre-initialized Flink namespace"""
-        stdout_capture, stderr_capture = self._create_output_captures()
 
         try:
             namespace = self._setup_execution_namespace()
             if namespace is None:
                 return self._create_setup_error_result()
 
-            execution_result = self._execute_code_with_capture(received_code, namespace,
-                                                              stdout_capture, stderr_capture)
+            execution_result = self._execute_code_with_capture(received_code, namespace)
             self._log_execution_outputs(execution_result)
             return execution_result
 
         except Exception as e:
-            return self._handle_critical_error(e, stdout_capture)
+            return self._handle_critical_error(e)
 
     def _create_output_captures(self):
         """Create StringIO objects for capturing stdout and stderr"""
@@ -339,54 +450,290 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
             'final_program': ""
         }
 
-    def _execute_code_with_capture(self, code, namespace, stdout_capture, stderr_capture):
+    def _execute_code_with_capture(self, code, namespace):
         """Execute code with output capture and error handling"""
         print(f"[{datetime.now()}] Executing received code...")
 
-        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            success, error_name, error_msg = self._try_execute_code(code, namespace)
+        stdout_capture_opt, stderr_capture_opt = self._create_output_captures()
+        with redirect_stdout(stdout_capture_opt), redirect_stderr(stderr_capture_opt):
+            result_opt = self._try_execute_code_as_is(code, namespace)
+        result_opt = {**result_opt, "stdout": stdout_capture_opt.getvalue(), "stderr": stderr_capture_opt.getvalue()}
 
-        return self._build_execution_result(code, stdout_capture, stderr_capture,
-                                          success, error_name, error_msg)
+        stdout_capture_unopt, stderr_capture_unopt = self._create_output_captures()
+        with redirect_stdout(stdout_capture_unopt), redirect_stderr(stderr_capture_unopt):
+            result_unopt = self._try_execute_code_unopt(code, namespace)
+        result_unopt = {**result_unopt, "stdout": stdout_capture_unopt.getvalue(), "stderr": stderr_capture_unopt.getvalue()}
 
-    def _try_execute_code(self, code, namespace):
+        return self._build_execution_result(code, result_opt, result_unopt)
+
+    def _try_execute_code_as_is(self, code, namespace):
         """Attempt code execution and capture any errors"""
+        namespace['table_env'] = namespace['opt_table_env']
+        return self._try_exec_code(code, namespace)
+
+    def _try_execute_code_unopt(self, code, namespace):
+        """Attempt code execution and capture any errors"""
+        namespace['table_env'] = namespace['unopt_table_env']
+        return self._try_exec_code(code, namespace)
+
+    def _try_exec_code(self, code, namespace):
         try:
             exec(code, namespace, namespace)
-            return True, "", ""
+            return {"success": True, "error_name": "", "error_message": ""}
         except Exception as e:
             error_name = self.extract_error_name(e)
-            error_msg = f"{str(e)}\n{traceback.format_exc()}"
-            return False, error_name, error_msg
+#             error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            error_msg = str(e)
+            return {"success": False, "error_name": error_name, "error_message": error_msg}
 
-    def _build_execution_result(self, code, stdout_capture, stderr_capture,
-                              success, error_name, error_msg):
-        """Build the execution result dictionary"""
-        stdout_output = stdout_capture.getvalue()
-        stderr_output = self._combine_stderr_outputs(stderr_capture.getvalue(), error_msg)
+    def diff_outputs(self, result_opt, result_unopt):
+        """
+        Compare two result dictionaries based on success status and content.
 
-        print(f"[{datetime.now()}] Code execution completed. Success: {success}")
+        result_dict format:
+            {"success": True, "error_name": "", "error_message": "", "stdout": "", "stderr": ""}
 
+        Returns:
+            dict: Comparison result with is_same, result_name, and result_details
+        """
+        # Check for success status mismatch
+        if self._has_success_mismatch(result_opt, result_unopt):
+            return self._create_mismatch_result(result_opt, result_unopt)
+
+        # Both have same success status
+        if not result_opt["success"] and not result_unopt["success"]:
+            return self._diff_error_results(result_opt, result_unopt)
+        elif result_opt["success"] and result_unopt["success"]:
+            return self._diff_success_results(result_opt, result_unopt)
+
+        # This should not happen due to the first check, but added for completeness
+        return self._create_mismatch_result(result_opt, result_unopt)
+
+
+    def _has_success_mismatch(self, result_opt, result_unopt):
+        """Check if there's a mismatch in success status between results."""
+        return result_opt["success"] != result_unopt["success"]
+
+
+    def _create_mismatch_result(self, result_opt, result_unopt):
+        """Create a mismatch exception result with both dictionaries in details."""
         return {
-            'stdout': stdout_output,
-            'stderr': stderr_output,
-            'return_code': 0 if success else 1,
-            'success': success,
-            'error_message': error_msg,
-            'error_name': error_name,
-            'final_program': code
+            "is_same": False,
+            "result_name": "MismatchException",
+            "result_details": {
+                "opt": result_opt,
+                "unopt": result_unopt
+            }
         }
 
-    def _combine_stderr_outputs(self, stderr_output, error_msg):
-        """Combine stderr capture with execution error messages"""
-        if error_msg:
-            return stderr_output + error_msg
-        return stderr_output
+
+    def _diff_error_results(self, result_opt, result_unopt):
+        """Compare two failed results based on their error names."""
+        opt_error = result_opt.get("error_name", "")
+        unopt_error = result_unopt.get("error_name", "")
+
+        if opt_error == unopt_error:
+            return {
+                "is_same": True,
+                "result_name": opt_error,
+                "result_details": {
+                    "opt": result_opt,
+                    "unopt": result_unopt
+                }
+            }
+        else:
+            return {
+                "is_same": False,
+                "result_name": "MismatchException",
+                "result_details": {
+                    "opt_error": opt_error,
+                    "unopt_error": unopt_error
+                }
+            }
+
+    def _extract_ast(self, plan: str) -> str:
+        start = plan.find("== Optimized Execution Plan ==")
+        if start < 0:
+            # fallback if header text changes across versions
+            return plan
+        m = re.search(r"\n== .*? ==\n", plan[start+1:])
+        end = start + 1 + (m.start() if m else len(plan) - (start + 1))
+        return plan[start:end].strip()
+
+    def _extract_ast_lines(self, plan_string):
+        """Extract lines after '== Optimized Execution Plan ==' marker."""
+        if not plan_string:
+            return []
+
+        lines = plan_string.strip().split('\n')
+        ast_start_idx = self._find_ast_marker_index(lines)
+
+        if ast_start_idx is None:
+            return []
+
+        return [line.rstrip() for line in lines[ast_start_idx:] if line.strip()]
+
+    def _find_ast_marker_index(self, lines):
+        """Find the index after the AST marker line."""
+        for i, line in enumerate(lines):
+            if "== Optimized Execution Plan ==" in line:
+                return i + 1  # Start after the marker line
+        return None
+
+    def _are_plans_identical(self, opt_lines, unopt_lines):
+        """Check if two plan line lists are identical."""
+        return opt_lines == unopt_lines
+
+    def _generate_diff_output(self, opt_lines, unopt_lines):
+        """Generate and return unified diff as a list of strings."""
+
+        return list(difflib.unified_diff(
+            unopt_lines,
+            opt_lines,
+            fromfile='unoptimized_plan',
+            tofile='optimized_plan',
+            lineterm=''
+        ))
+
+
+    def _print_diff_results(self, is_same, diff_lines=None):
+        """Print the diff comparison results to console."""
+        print("\n=== DIFF RESULT ===")
+
+        if is_same:
+            print("Plans are identical!")
+        else:
+            print("Plans differ:")
+            if diff_lines:
+                print("\n".join(diff_lines))
+
+    def _create_result_dict(self, same_plans, opt_plan, unopt_plan, opt_lines, unopt_lines, diff_lines=None):
+        """Create the standardized result dictionary."""
+        result_name = "Success" if same_plans else "MismatchException"
+
+        return {
+            "is_same": same_plans,
+            "result_name": result_name,
+            "result_details": {
+                "opt_plan": opt_plan,
+                "unopt_plan": unopt_plan,
+                "diff_lines": "\n".join(diff_lines) if diff_lines else ""
+            }
+        }
+
+    def count_udfs_in_plan(self, plan):
+        """
+        Count the number of UDF calls in a PyFlink optimized query plan.
+
+        Args:
+            plan (str): The query plan string
+
+        Returns:
+            int: Number of UDF calls found in the plan
+        """
+        if not plan:
+            return 0
+
+        udf_count = 0
+
+        # Pattern to match Python UDF function references
+        # These typically appear as PythonScalarFunction, PythonTableFunction, etc.
+        python_function_pattern = r'\*org\.apache\.flink\.table\.functions\.python\.Python\w+Function[^*]*\*'
+
+        # Find all Python function references
+        python_functions = re.findall(python_function_pattern, plan)
+        udf_count += len(python_functions)
+
+        # Alternative pattern for other UDF representations that might appear
+        # Look for PythonCalc nodes which typically contain UDF calls
+        pythoncalc_pattern = r'PythonCalc\('
+        pythoncalc_matches = re.findall(pythoncalc_pattern, plan)
+
+        # If we found PythonCalc nodes but no Python function patterns,
+        # it might indicate UDFs in a different format
+        if len(pythoncalc_matches) > 0 and udf_count == 0:
+            # Count PythonCalc nodes as they typically represent UDF operations
+            udf_count = len(pythoncalc_matches)
+
+        # Look for other potential UDF patterns like custom function calls
+        # This catches cases where UDFs might be represented differently
+        custom_udf_pattern = r'(?:udf|UDF)\w*\('
+        custom_udfs = re.findall(custom_udf_pattern, plan, re.IGNORECASE)
+        udf_count += len(custom_udfs)
+
+        return udf_count
+
+    def _diff_success_results(self, result_opt, result_unopt):
+        """Compare stdout and stderr for two successful results."""
+        # Extract output streams
+        opt_stdout, opt_stderr = result_opt["stdout"], result_opt["stderr"]
+        unopt_stdout, unopt_stderr = result_unopt["stdout"], result_unopt["stderr"]
+
+        # Print plans
+        print("=== OPTIMIZED PLAN ====")
+        opt_plan = self._extract_ast(opt_stdout)
+        print(opt_plan)
+        print("=== UNOPTIMIZED PLAN ====")
+        unopt_plan = self._extract_ast(unopt_stdout)
+        print(unopt_plan)
+
+#         # Extract AST lines for comparison
+#         opt_lines = self._extract_ast_lines(opt_plan)
+#         unopt_lines = self._extract_ast_lines(unopt_plan)
+#
+#         # Compare plans
+#         same_plans = self._are_plans_identical(opt_lines, unopt_lines)
+#
+#         # Generate and print diff if needed
+#         diff_lines = None
+#         if not same_plans:
+#             diff_lines = self._generate_diff_output(opt_lines, unopt_lines)
+#
+#         self._print_diff_results(same_plans, diff_lines)
+        n_opt_udfs, n_unopt_udfs = list(map(lambda p: self.count_udfs_in_plan(p), [opt_plan, unopt_plan]))
+
+        # Return structured result
+#         return self._create_result_dict(same_plans, opt_plan, unopt_plan, opt_lines, unopt_lines, diff_lines)
+        same_udfs = n_opt_udfs == n_unopt_udfs
+        result_name = "Success" if same_udfs else "MismatchException"
+        return {
+            "is_same": same_udfs,
+            "result_name": result_name,
+            "result_details": {
+                "opt_plan": opt_plan,
+                "unopt_plan": unopt_plan,
+                "count_diff": {"n_opt_udfs": n_opt_udfs,"n_unopt_udfs": n_unopt_udfs}
+            }
+        }
+
+    def _build_execution_result(self, code, result_opt, result_unopt):
+        """Build the execution result dictionary"""
+
+        print(f"[{datetime.now()}] Code execution completed.")
+#         print(f"[{datetime.now()}] result_opt = {result_opt}.")
+#         print(f"[{datetime.now()}] result_unopt = {result_unopt}.")
+
+        diff_result = self.diff_outputs(result_opt, result_unopt)
+
+        final_program = "# ======== Program ========\n" + \
+                        f"{code}\n\n" + \
+                        "# ======== Details ========\n" + \
+                        f'"""\n{json.dumps(diff_result, indent=2, cls=MultilineJSONEncoder)}\n"""\n\n'
+        return {
+            "opt": { **result_opt },
+            "unopt": { **result_unopt },
+            "success": diff_result["is_same"],
+            "error_name": diff_result["result_name"],
+            "error_message": "",
+            "diff": diff_result["result_details"],
+            "final_program": final_program
+        }
 
     def _log_execution_outputs(self, result):
         """Log stdout and stderr outputs from execution"""
-        self._log_stdout_output(result['stdout'])
-        self._log_stderr_output(result['stderr'])
+#         self._log_stdout_output(result['stdout'])
+#         self._log_stderr_output(result['stderr'])
+        pass
 
     def _log_stdout_output(self, stdout_output):
         """Log stdout output if present"""
@@ -408,13 +755,13 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         else:
             print(f"[{datetime.now()}] No stderr output")
 
-    def _handle_critical_error(self, error, stdout_capture):
+    def _handle_critical_error(self, error):
         """Handle critical execution errors"""
         error_msg = f"Critical error during execution: {str(error)}\n{traceback.format_exc()}"
         self._log_critical_error(error_msg)
 
         return {
-            'stdout': stdout_capture.getvalue(),
+            'stdout': "",
             'stderr': error_msg,
             'return_code': -1,
             'success': False,
@@ -443,8 +790,9 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
             return execution_result
         except Exception as e:
+            import traceback
             self._log_handler_error(e)
-            return {}
+            return {"fatal_error": str(e), "stack_trace": traceback.format_exc()}
 
     def _log_handler_start(self):
         """Log the start of code execution handler"""
@@ -472,19 +820,17 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
     def _save_execution_logs(self, program_number, code, execution_result):
         """Save program execution logs to disk"""
-        stdout_output = execution_result['stdout']
-        stderr_output = execution_result['stderr']
-        self.save_program_logs(program_number, code, stdout_output, stderr_output)
+        self.save_program_logs(program_number, code)
 
     def _log_execution_results(self, program_number, execution_result):
         """Log detailed execution results"""
         success = execution_result['success']
-        return_code = execution_result['return_code']
-        stderr_output = execution_result['stderr']
+        return_code = 0 # execution_result['return_code']
+#         stderr_output = execution_result['stderr']
         namespace = execution_result.get('namespace', {})
 
         self._print_results_header(program_number, success, return_code)
-        self._print_error_details(stderr_output)
+#         self._print_error_details(stderr_output)
         self._print_namespace_info(namespace)
         self._print_results_footer()
 
@@ -732,5 +1078,37 @@ def run_server(port: int = 8888):
         print("\nShutting down server...")
         httpd.shutdown()
 
+
+def main():
+    o = FlinkFuzzingHandler()
+
+    result_opt = {
+        "stdout": """
+    == Optimized Execution Plan ==
+    LogicalProject(d_qoy=[$1])
+    +- LogicalAggregate(group=[{4}], EXPR$0=[COUNT($10)])
+       +- LogicalFilter(condition=[>=($8, 16)])
+          +- LogicalTableScan(table=[[default_catalog, default_database, date_dim]])
+    """,
+        "stderr": "No errors detected.\n"
+    }
+
+    # Example unoptimized result (with different plan structure)
+    result_unopt = {
+        "stdout": """
+    == Optimized Execution Plan ==
+    LogicalProject(d_qoy=[$1])
+    +- LogicalAggregate(group=[{4}], EXPR$0=[COUNT($10)])
+       +- LogicalSort(fetch=[53])
+          +- LogicalFilter(condition=[>=($8, 16)])
+             +- LogicalTableScan(table=[[default_catalog, default_database, date_dim]])
+    """,
+        "stderr": "Warning: Query not optimized.\n"
+    }
+    d = o._diff_success_results(result_opt, result_unopt)
+    print(json.dumps(d, indent=2))
+
 if __name__ == '__main__':
     run_server()
+#     main()
+

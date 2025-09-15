@@ -312,6 +312,15 @@ object UserImplFlinkPython {
     s"col('$fullColName')"
   }
 
+  def generateUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
+    val fullColExpressions = args.map{case (table, col) => s"col('${constructFullColumnName(table, col)}')"}
+
+    if(node.value.name.contains("filter"))
+      s"preloaded_udf_boolean(${fullColExpressions.mkString(",")})"
+    else
+      s"preloaded_udf_complex(${fullColExpressions.mkString(",")})"
+  }
+
   def generateSingleColumnExpression(
                                       node: Node[DFOperator],
                                       param: JsLookupResult,
@@ -321,7 +330,7 @@ object UserImplFlinkPython {
 
     val config = fuzzer.core.global.State.config.get
     val prob = config.probUDFInsert
-    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val chosenTuple@(table, col) = pickRandomColumnFromReachableSources(node)
     val fullColName = constructFullColumnName(table, col)
     val colExpr = s"col('$fullColName')"
 
@@ -345,9 +354,9 @@ object UserImplFlinkPython {
     val floatExpr = s"$colExpr $pyFlinkOp $floatValue"
     val stringExpr = s"$colExpr.char_length $pyFlinkOp 5"
     val boolExpr = s"!$colExpr"
-    val udfExpr = s"preloaded_udf($colExpr)"
+    val udfExpr = generateUDFCall(node, List(chosenTuple))
 
-    if (Random.nextFloat() < prob && !node.value.name.contains("filter")) {
+    if (Random.nextFloat() < prob) {
       udfExpr
     } else {
       col.dataType match {
@@ -357,7 +366,7 @@ object UserImplFlinkPython {
         case fuzzer.data.types.BooleanType => boolExpr
         case fuzzer.data.types.LongType => intExpr
         case fuzzer.data.types.DecimalType => floatExpr
-        case fuzzer.data.types.DateType => udfExpr
+        case fuzzer.data.types.DateType => stringExpr
       }
     }
   }
@@ -415,6 +424,28 @@ object UserImplFlinkPython {
     }
   }
 
+  def generatePreloadedUDF(): String = {
+    """
+      |class MyObject:
+      |    def __init__(self, name, value):
+      |        self.name = name
+      |        self.value = value
+      |
+      |# UDF that returns the custom object
+      |@udf(result_type=DataTypes.ROW([
+      |    DataTypes.FIELD("name", DataTypes.STRING()),
+      |    DataTypes.FIELD("value", DataTypes.INT())
+      |]))
+      |def preloaded_udf_complex(*input_val):
+      |    obj = MyObject("test", hash(input_val[0]))
+      |    return (obj.name, obj.value)  # Return as tuple
+      |
+      |@udf(result_type=DataTypes.BOOLEAN())
+      |def preloaded_udf_boolean(input_val):
+      |    return True
+      |""".stripMargin
+  }
+
   def dag2FlinkPython(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
     val l = mutable.ListBuffer[String]()
     val variablePrefix = "auto"
@@ -423,7 +454,9 @@ object UserImplFlinkPython {
     // Add PyFlink imports
     l += "from pyflink.table import *"
     l += "from pyflink.table.expressions import *"
-    l += ""
+    l += "from pyflink.table.udf import udf"
+    l += "from pyflink.table.types import DataTypes"
+    l += generatePreloadedUDF()
 
     graph.traverseTopological { node =>
       node.value.varName = s"$variablePrefix${node.id}"
@@ -437,22 +470,24 @@ object UserImplFlinkPython {
       val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
       val svAfter = s"${node.value.stateView}"
 
-      val line =
-        s"""
-          |# STATE VIEW BEFORE: $svBefore
-          |$lhs$call
-          |# STATE VIEW AFTER: $svAfter
-          |""".stripMargin
-//      val line = s"$lhs$call"
+//      val line =
+//        s"""
+//          |# STATE VIEW BEFORE: $svBefore
+//          |$lhs$call
+//          |# STATE VIEW AFTER: $svAfter
+//          |""".stripMargin
+      val line = s"$lhs$call"
 
       l += line
 
     }
 
     // PyFlink equivalent of explain
-    l += s"$finalVariableName.explain()"
+    l += s"print($finalVariableName.explain())"
 
-    SourceCode(src = l.mkString("\n"), ast = null)
+    val code = l.mkString("\n")
+
+    SourceCode(src = code, ast = null)
   }
 
 }

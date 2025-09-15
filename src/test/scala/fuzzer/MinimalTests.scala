@@ -129,79 +129,116 @@ class MinimalTests {
       .build()
 
     // Send source code to Python server as JSON HTTP request
-      val sourceLines = sourceCode.toString.split("\n")
-      val (first5Lines, rest) = sourceLines.splitAt(6)
-      val addedCode = List(
-        // """print(f"COLS: {auto0.get_schema().get_field_names()}")""",
-        // """print(f"COLS: {auto6.get_schema().get_field_names()}")""",
-        // """
-        // |print("COLUMNS:", auto11.get_schema().get_field_names())
-        // |
-        // |result = auto11.execute()
-        // |for i, row in enumerate(result.collect()):
-        // |    if i >= 10:  # limit to first 10 rows
-        // |        break
-        // |    print(row)""".stripMargin
-      )
-      val codeString = (first5Lines ++ addedCode ++ rest).mkString("\n")
+    val sourceLines = sourceCode.toString.split("\n")
+    val (first5Lines, rest) = sourceLines.splitAt(6)
+    val addedCode = List(
+      // """print(f"COLS: {auto0.get_schema().get_field_names()}")""",
+      // """print(f"COLS: {auto6.get_schema().get_field_names()}")""",
+      // """
+      // |print("COLUMNS:", auto11.get_schema().get_field_names())
+      // |
+      // |result = auto11.execute()
+      // |for i, row in enumerate(result.collect()):
+      // |    if i >= 10:  # limit to first 10 rows
+      // |        break
+      // |    print(row)""".stripMargin
+    )
+//    val codeString = (first5Lines ++ addedCode ++ rest).mkString("\n")
+    val codeString =
+      s"""
+        |from pyflink.table import *
+        |from pyflink.table.expressions import *
+        |from pyflink.table.udf import udf
+        |from pyflink.table.types import DataTypes
+        |
+        |${UserImplFlinkPython.generatePreloadedUDF()}
+        |
+        |autonode_17 = table_env.from_path("catalog_returns")
+        |autonode_18 = table_env.from_path("reason")
+        |autonode_19 = table_env.from_path("customer")
+        |autonode_21 = table_env.from_path("web_page")
+        |autonode_20 = table_env.from_path("web_site")
+        |autonode_13 = autonode_17.distinct()
+        |autonode_14 = autonode_18.alias('Z4anh')
+        |autonode_15 = autonode_19.select(col('c_last_review_date'))
+        |autonode_16 = autonode_20.join(autonode_21, col('web_street_name') == col('wp_rec_end_date'))
+        |autonode_9 = autonode_13.filter(col('cr_order_number') >= -9)
+        |autonode_10 = autonode_14.group_by(col('r_reason_desc')).select(col('r_reason_desc').max.alias('r_reason_desc'))
+        |autonode_11 = autonode_15.limit(88)
+        |autonode_12 = autonode_16.filter(col('wp_char_count') < -17)
+        |autonode_5 = autonode_9.filter(col('cr_item_sk') < 18)
+        |autonode_6 = autonode_10.order_by(col('r_reason_desc'))
+        |autonode_7 = autonode_11.add_columns(lit("hello"))
+        |autonode_8 = autonode_12.filter(col('web_county').char_length < 5)
+        |autonode_3 = autonode_5.join(autonode_6, preloaded_udf_boolean(col('cr_return_quantity')))
+        |autonode_4 = autonode_7.join(autonode_8, col('web_company_id') == col('wp_char_count'))
+        |autonode_2 = autonode_3.join(autonode_4, col('web_gmt_offset') == col('cr_fee'))
+        |autonode_1 = autonode_2.group_by(col('wp_creation_date_sk')).select(col('web_country').max.alias('web_country'))
+        |sink = autonode_1.filter(col('web_country').char_length < 5)
+        |print(sink.explain())
+        |""".stripMargin
 
-      val loadRequest = Json.obj(
-        "message_type" -> "load_data"
-      )
+    val loadRequest = Json.obj(
+      "message_type" -> "load_data"
+    )
 
-      HttpUtils.postJson(client, loadRequest, "localhost", 8888, timeoutSeconds = 120)
+    HttpUtils.postJson(client, loadRequest, "localhost", 8888, timeoutSeconds = 120)
 
-      // Create JSON request
-      val jsonRequest = Json.obj(
-        "message_type" -> "execute_code",
-        "code" -> codeString
-      )
+    // Create JSON request
+    val jsonRequest = Json.obj(
+      "message_type" -> "execute_code",
+      "code" -> codeString
+    )
 
-      val jsonString = jsonRequest.toString()
+    val jsonString = jsonRequest.toString()
 
-      val request = HttpRequest.newBuilder()
-        .uri(URI.create(s"http://$serverHost:$serverPort"))
-        .header("Content-Type", "application/json")
-        .POST(HttpRequest.BodyPublishers.ofString(jsonString))
-        .build()
+    val request = HttpRequest.newBuilder()
+      .uri(URI.create(s"http://$serverHost:$serverPort"))
+      .header("Content-Type", "application/json")
+      .POST(HttpRequest.BodyPublishers.ofString(jsonString))
+      .build()
 
-      println(s"Sending execute_code JSON request to http://$serverHost:$serverPort")
-      println(s"Request body: $jsonString")
+    println(s"Sending execute_code JSON request to http://$serverHost:$serverPort")
+    println(s"Request body: $jsonString")
 
-      // Make HTTP request
-      val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+    // Make HTTP request
+    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
-      println(s"HTTP Response Status: ${response.statusCode()}")
-      val responseBody = response.body()
+    println(s"HTTP Response Status: ${response.statusCode()}")
+    val responseBody = response.body()
 
-      if (responseBody.nonEmpty) {
-        try {
-          val responseJson = Json.parse(responseBody)
-          val success = (responseJson \ "success").asOpt[Boolean].getOrElse(false)
-          val message = (responseJson \ "message").asOpt[String]
-          val error = (responseJson \ "error").asOpt[String]
-          val programNumber = (responseJson \ "program_number").asOpt[Int]
-          val returnCode = (responseJson \ "return_code").asOpt[Int]
-          val stdout = (responseJson \ "stdout").asOpt[String]
-          val stderr = (responseJson \ "stderr").asOpt[String]
+    println("==== RAW RESPONSE =====")
+    println(responseBody)
+    println("=======================")
 
-          println(s"Server response - Success: $success")
-          if (programNumber.isDefined) println(s"Program Number: ${programNumber.get}")
-          if (returnCode.isDefined) println(s"Return Code: ${returnCode.get}")
-          if (message.isDefined) println(s"Message: ${message.get}")
-          if (error.isDefined) println(s"Error: ${error.get}")
-          if (stdout.isDefined && stdout.get.nonEmpty) println(s"STDOUT:\n${stdout.get}")
-          if (stderr.isDefined && stderr.get.nonEmpty) println(s"STDERR:\n${stderr.get}")
+    if (responseBody.nonEmpty) {
+      try {
+        val responseJson = Json.parse(responseBody)
+        val success = (responseJson \ "success").asOpt[Boolean].getOrElse(false)
+        val message = (responseJson \ "message").asOpt[String]
+        val error = (responseJson \ "error").asOpt[String]
+        val programNumber = (responseJson \ "program_number").asOpt[Int]
+        val returnCode = (responseJson \ "return_code").asOpt[Int]
+        val stdout = (responseJson \ "stdout").asOpt[String]
+        val stderr = (responseJson \ "stderr").asOpt[String]
 
-        } catch {
-          case _: Exception =>
-            println(s"Raw server response: $responseBody")
-        }
-      } else {
-        println("Empty response from server")
+        println(s"Server response - Success: $success")
+        if (programNumber.isDefined) println(s"Program Number: ${programNumber.get}")
+        if (returnCode.isDefined) println(s"Return Code: ${returnCode.get}")
+        if (message.isDefined) println(s"Message: ${message.get}")
+        if (error.isDefined) println(s"Error: ${error.get}")
+        if (stdout.isDefined && stdout.get.nonEmpty) println(s"STDOUT:\n${stdout.get}")
+        if (stderr.isDefined && stderr.get.nonEmpty) println(s"STDERR:\n${stderr.get}")
+
+      } catch {
+        case _: Exception =>
+          println(s"Raw server response: $responseBody")
       }
+    } else {
+      println("Empty response from server")
+    }
 
-      assert(response.statusCode() == 200)
+    assert(response.statusCode() == 200)
 
 
 //    result match {

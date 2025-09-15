@@ -1,4 +1,4 @@
 package fuzzer.core.exceptions
 
 
-class Success(message: String) extends Throwable(message)
+class Success(message: String) extends Exception(message)

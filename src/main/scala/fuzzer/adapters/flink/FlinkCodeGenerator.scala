@@ -2,7 +2,7 @@ package fuzzer.adapters.flink
 
 import fuzzer.code.SourceCode
 import fuzzer.core.exceptions
-import fuzzer.core.exceptions.{DAGFuzzerException, TableException, ValidationException}
+import fuzzer.core.exceptions.{DAGFuzzerException, MismatchException, TableException, ValidationException}
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
@@ -133,31 +133,71 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     }
   }
 
-  private def jsonToMap(responseJson: JsValue): Map[String, Any] = {
-
-    println("RAW RESPONSE")
-    println(responseJson.toString())
-    try {
-      Map(
-        "success" -> (responseJson \ "success").as[Boolean],
-        "error_message" -> (responseJson \ "error_message").as[String],
-        "error_name" -> (responseJson \ "error_name").as[String],
-        "return_code" -> (responseJson \ "return_code").as[Int],
-        "final_program" -> (responseJson \ "final_program").as[String],
-        "stdout" -> (responseJson \ "stdout").as[String],
-        "stderr" -> (responseJson \ "stderr").as[String],
-      )
-    } catch {
-      case ex: Exception => throw new DAGFuzzerException(ex.getMessage, ex)
+  private def jsonToMap(json: JsValue): Map[String, Any] = {
+    json.as[Map[String, JsValue]].map { case (key, value) =>
+      key -> jsValueToScala(value)
     }
-
   }
 
-  private def printResponse(responseMap: Map[String, Any]): Unit = {
-      println(s"Server response - Success: ${responseMap("success")}")
-      println(s"Return Code: ${responseMap("return_code")}")
-      println(s"STDOUT:\n${responseMap("stdout")}")
-      println(s"STDERR:\n${responseMap("stderr")}")
+  private def jsValueToScala(jsValue: JsValue): Any = {
+    jsValue match {
+      case JsNull => null
+      case JsBoolean(b) => b
+      case JsNumber(n) => if (n.isValidInt) n.toInt else n.toDouble
+      case JsString(s) => s
+      case arr: JsArray => arr.value.map(jsValueToScala).toList
+      case obj: JsObject => obj.value.map { case (k, v) => k -> jsValueToScala(v) }.toMap
+    }
+  }
+
+  private def truncate(str: String, maxLength: Int): String = {
+    if (str == null) return ""
+    if (maxLength <= 0) return ""
+    if (str.length <= maxLength) return str
+    if (maxLength <= 3) return "." * maxLength
+
+    str.take(maxLength - 3) + "..."
+  }
+
+  private def prettyPrintMap(map: Map[String, Any], indent: Int = 0): String = {
+    val indentStr = "  " * indent
+    val entries = map.map { case (key, value) =>
+      val valueStr = value match {
+        case m: Map[String, Any] @unchecked =>
+          s"\n${prettyPrintMap(m, indent + 1)}"
+        case list: List[Any] @unchecked =>
+          prettyPrintList(list, indent + 1)
+        case arr: Vector[Any] @unchecked =>
+          prettyPrintList(arr.toList, indent + 1)
+        case null => "null"
+        case str: String => s""""$str""""
+        case other => other.toString
+      }
+      s"$indentStr$key -> ${truncate(valueStr, 30)}"
+    }
+
+    if (indent == 0) {
+      "Map(\n" + entries.mkString(",\n") + "\n)"
+    } else {
+      "Map(\n" + entries.mkString(",\n") + s"\n${"  " * (indent - 1)})"
+    }
+  }
+
+  private def prettyPrintList(list: List[Any], indent: Int): String = {
+    val indentStr = "  " * indent
+    val items = list.map {
+      case m: Map[String, Any] @unchecked =>
+        s"\n$indentStr${prettyPrintMap(m, indent + 1)}"
+      case null => "null"
+      case str: String => s""""$str""""
+      case other => other.toString
+    }
+
+    if (items.forall(!_.startsWith("\n"))) {
+      s"List(${items.mkString(", ")})"
+    } else {
+      s"List(\n${items.mkString(",\n")}\n${"  " * (indent - 1)})"
+    }
   }
 
   override def execute(sourceCode: SourceCode): ExecutionResult = {
@@ -202,39 +242,42 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     }
 
     val responseMap = jsonToMap(responseJson)
-    printResponse(responseMap)
+//    println(prettyPrintMap(responseMap))
 
     mapToExecutionResult(responseMap)
   }
 
   private def createException(errorName: String, errorMessage: String): Exception = {
 
-    errorName match {
+    errorName.trim() match {
       case "ValidationException" => new ValidationException(errorMessage)
       case "RuntimeException" => new RuntimeException(errorMessage)
       case "TableException" => new TableException(errorMessage)
+      case "MismatchException" => new MismatchException(errorMessage)
+      case "Success" | "" => new exceptions.Success("Generated query hit the optimizer")
       case _ => new Exception(errorMessage)
     }
   }
 
   private def mapToExecutionResult(responseMap: Map[String, Any]): ExecutionResult = {
-    val success = responseMap("success").asInstanceOf[Boolean]
+    val same_output = responseMap("success").asInstanceOf[Boolean]
     val errorName = responseMap("error_name").asInstanceOf[String]
     val errorMessage = responseMap("error_message").asInstanceOf[String]
-    val (stdout, stderr) = (responseMap("stdout").asInstanceOf[String], responseMap("stderr").asInstanceOf[String])
-
     val finalProgram = responseMap.getOrElse("final_program", "").asInstanceOf[String]
-    val sourceWithResults = s"$finalProgram\n\nSTDOUT:\n$stdout\n\nSTDERR:\n$stderr"
+    val sourceWithResults = s"$finalProgram"
+
 
     ExecutionResult(
-      success = success,
-      exception = if (success) new exceptions.Success("dummy") else createException(errorName, errorMessage),
+      success = same_output,
+      exception = createException(errorName, errorMessage),
       combinedSourceWithResults = sourceWithResults)
   }
 
   override def setupEnvironment(): () => Unit = {
     val processBuilder = Process("pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py") #> new File(".server.log")
     val process = processBuilder.run()
+
+    Thread.sleep(500)
 
     () => {
       process.destroy()

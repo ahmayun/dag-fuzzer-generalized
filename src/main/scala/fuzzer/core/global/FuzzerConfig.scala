@@ -84,7 +84,7 @@ object FuzzerConfig {
       updateLiveStatsAfter = 10,
       intermediateVarPrefix = "auto",
       finalVariableName = "sink",
-      probUDFInsert = 0,
+      probUDFInsert = 0.1,
       maxListLength = 1,
       randIntMin = -50,
       randIntMax = 50,

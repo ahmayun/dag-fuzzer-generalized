@@ -133,7 +133,7 @@ object DAGGenUtils {
     var nodeCounter = 0
 
     def createNode(level: Int): Node[T] = {
-      val id = s"node_${nodeCounter}"
+      val id = s"node_$nodeCounter"
       nodeCounter += 1
       val node = Node(id, valueGenerator(level))
       nodesMap(id) = node

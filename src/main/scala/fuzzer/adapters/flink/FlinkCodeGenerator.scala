@@ -116,6 +116,17 @@ class FlinkDataAdapter(config: FuzzerConfig) extends DataAdapter {
     }
   }
 
+  override def prepTableMetadata(sources: List[(Node[DFOperator], TableMetadata)]): List[(Node[DFOperator], TableMetadata)] = {
+    sources.map { case (node, table) =>
+      val columns = table.columns.map(c => c.copy(name = s"${c.name}_${node.id}"))
+      (node, TableMetadata(
+        table.identifier,
+        columns,
+        table.metadata
+      ))
+    }
+  }
+
 }
 
 class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor {

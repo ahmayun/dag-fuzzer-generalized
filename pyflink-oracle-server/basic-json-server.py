@@ -206,14 +206,6 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         cfg.set_string("table.optimizer.distinct-agg.split.enabled", "false")
         cfg.set_string("table.optimizer.local-global-agg-enabled", "false")
 
-#         cfg.set_string("table.optimizer.adaptive-broadcast-join.strategy", "none")
-#         cfg.set_string("table.optimizer.skewed-join-optimization.strategy", "NONE")
-#         cfg.set_string("table.optimizer.broadcast-join.threshold", "-1")
-
-#         cfg.set_string("table.exec.mini-batch.enabled", "false")
-#         cfg.set_string("table.exec.mini-batch.allow-latency", "0 ms")
-#         cfg.set_string("table.exec.mini-batch.size", "-1")
-
         # Source Push-down Optimizations - Turn OFF
         cfg.set_string("table.optimizer.source.predicate-pushdown-enabled", "false")
         cfg.set_string("table.optimizer.source.aggregate-pushdown-enabled", "false")

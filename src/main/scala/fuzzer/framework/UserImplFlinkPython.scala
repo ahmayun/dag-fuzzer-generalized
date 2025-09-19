@@ -463,19 +463,24 @@ object UserImplFlinkPython {
       val svBefore = s"${node.value.stateView}"
 
       val call = node.getInDegree match {
-        case 0 => constructDFOCall(spec, node, null, null)
+        case 0 =>
+          val loadCall = constructDFOCall(spec, node, null, null)
+          val aliasing = s""".select(*[col(column_name).alias(f"{column_name}_${node.id}") for column_name in $loadCall.get_schema().get_field_names()])"""
+
+          s"$loadCall$aliasing"
         case 1 => constructDFOCall(spec, node, node.parents.head.value.varName, null)
         case 2 => constructDFOCall(spec, node, node.parents.head.value.varName, node.parents.last.value.varName)
       }
       val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
-      val svAfter = s"${node.value.stateView}"
 
+//      val svAfter = s"${node.value.stateView}"
 //      val line =
 //        s"""
 //          |# STATE VIEW BEFORE: $svBefore
 //          |$lhs$call
 //          |# STATE VIEW AFTER: $svAfter
 //          |""".stripMargin
+
       val line = s"$lhs$call"
 
       l += line

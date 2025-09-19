@@ -34,6 +34,10 @@ class SparkDataAdapter(config: FuzzerConfig) extends DataAdapter {
     println("Loaded tpcds datasets successfully!")
   }
 
+  override def prepTableMetadata(sources: List[(Node[DFOperator], TableMetadata)]): List[(Node[DFOperator], TableMetadata)] = {
+    sources
+  }
+
 }
 
 class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor {

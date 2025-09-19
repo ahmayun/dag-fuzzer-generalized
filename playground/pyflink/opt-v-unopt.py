@@ -20,26 +20,17 @@ def _build_env(disable_opts: bool, session_opts: Optional[Dict[str, str]] = None
     if disable_opts:
         cfg = Configuration()
         cfg.set_string("table.optimizer.join-reorder-enabled", "false")
+        cfg.set_string("table.optimizer.sql2rel.project-merge.enabled", "false")
+        cfg.set_string("table.optimizer.union-all-as-breakpoint-enabled", "false")
+        cfg.set_string("table.optimizer.incremental-agg-enabled", "false")
         cfg.set_string("table.optimizer.reuse-sub-plan-enabled", "false")
         cfg.set_string("table.optimizer.reuse-source-enabled", "false")
         cfg.set_string("table.optimizer.multiple-input-enabled", "false")
         cfg.set_string("table.optimizer.runtime-filter.enabled", "false")
         cfg.set_string("table.optimizer.dynamic-filtering.enabled", "false")
 
-        # Aggregation Optimizations - Turn OFF
-        cfg.set_string("table.optimizer.agg-phase-strategy", "ONE_PHASE")
         cfg.set_string("table.optimizer.distinct-agg.split.enabled", "false")
         cfg.set_string("table.optimizer.local-global-agg-enabled", "false")
-
-        # Join Optimizations - Turn OFF
-        cfg.set_string("table.optimizer.adaptive-broadcast-join.strategy", "none")
-        cfg.set_string("table.optimizer.skewed-join-optimization.strategy", "NONE")
-        cfg.set_string("table.optimizer.broadcast-join.threshold", "-1")
-
-        # Mini-Batch Optimization - Turn OFF
-        cfg.set_string("table.exec.mini-batch.enabled", "false")
-        cfg.set_string("table.exec.mini-batch.allow-latency", "0 ms")
-        cfg.set_string("table.exec.mini-batch.size", "-1")
 
         # Source Push-down Optimizations - Turn OFF
         cfg.set_string("table.optimizer.source.predicate-pushdown-enabled", "false")
@@ -94,8 +85,6 @@ def _build_env(disable_opts: bool, session_opts: Optional[Dict[str, str]] = None
         # Legacy Features - Enable (disables new optimizations)
         cfg.set_string("table.exec.legacy-cast-behaviour", "ENABLED")
 
-        # Runtime Filter - Turn OFF
-        cfg.set_string("table.optimizer.runtime-filter.enabled", "false")
         cfg.set_string("table.optimizer.runtime-filter.max-build-data-size", "0")
 
         # Dynamic Table Options - Turn OFF
@@ -112,6 +101,7 @@ def _build_env(disable_opts: bool, session_opts: Optional[Dict[str, str]] = None
         cfg.set_string("table.optimizer.partition-pruning-enabled", "false")
         cfg.set_string("table.optimizer.projection-pushdown-enabled", "false")
         cfg.set_string("table.optimizer.subquery-decorrelation-enabled", "false")
+        cfg.set_string("table.optimizer.operator-fusion-codegen.enabled", "false")
 
         settings = (
             EnvironmentSettings.new_instance()

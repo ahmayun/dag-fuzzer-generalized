@@ -11,7 +11,7 @@ import fuzzer.utils.io.ReadWriteUtils.{prettyPrintStats, writeLiveStats}
 import fuzzer.utils.random.Random
 import org.yaml.snakeyaml.Yaml
 import play.api.libs.json.{JsObject, JsValue}
-
+import scala.io.StdIn
 import scala.collection.mutable
 import java.io.{File, FileWriter}
 import scala.util.control.Breaks.{break, breakable}
@@ -97,8 +97,10 @@ class FuzzerEngine(
 
     val dfg = fillOperators(dag, apiSpec)
     dfg.computeReachabilityFromSources()
+
     val zipped = dfg.getSourceNodes.sortBy(_.value.id).zip(tables)
-    zipped.foreach {
+    val preprocessed = dataAdapter.prepTableMetadata(zipped)
+    preprocessed.foreach {
       case (node, table) =>
         node.value.state = table
     }
@@ -129,7 +131,6 @@ class FuzzerEngine(
     generatedSource
   }
 
-
   private def createDAGIteratorInternal(config: FuzzerConfig): Iterator[(Graph[DFOperator], String)] = {
     new Iterator[(Graph[DFOperator], String)] {
       var counter: Int = -1
@@ -159,6 +160,7 @@ class FuzzerEngine(
     // Setup environment
     val terminateF = codeExecutor.setupEnvironment()
     dataAdapter.loadData(codeExecutor)
+    val allTables = dataAdapter.getTables
 
     // Track time for timeout
     val startTime = System.currentTimeMillis()
@@ -177,7 +179,7 @@ class FuzzerEngine(
       val dagIterator = createDAGGenerator(config)
       while (!shouldStop) {
         val (dag, dagName) = dagIterator.next()
-        processSingleDAG(dag, dagName, stats, shouldStop, startTime)
+        processSingleDAG(dag, dagName, stats, shouldStop, startTime, allTables)
       }
 
       // Return final results
@@ -206,7 +208,7 @@ class FuzzerEngine(
 
   }
 
-  private def processSingleDAG(dag: Graph[DFOperator], dagName: String, stats: CampaignStats, shouldStop: => Boolean, startTime: Long): Unit = {
+  private def processSingleDAG(dag: Graph[DFOperator], dagName: String, stats: CampaignStats, shouldStop: => Boolean, startTime: Long, allTables: Seq[TableMetadata]): Unit = {
     try {
       val (isInvalid, message) = isInvalidDFG(dag)
       if (isInvalid) {
@@ -222,7 +224,10 @@ class FuzzerEngine(
           stats.setIteration(fuzzer.core.global.State.iteration)
 
           try {
-            val selectedTables = Random.shuffle(dataAdapter.getTables).take(dag.getSourceNodes.length).toList
+            // --- Sampling tables without replacement ---
+            // val selectedTables = Random.shuffle(allTables).take(dag.getSourceNodes.length).toList
+            // --- Sampling tables with replacement ---
+            val selectedTables = (1 to dag.getSourceNodes.length).map(_ => allTables(Random.nextInt(allTables.length))).toList
             val sourceCode = generateSingleProgram(dag, spec, codeGenerator.getDag2CodeFunc, selectedTables)
             val results = codeExecutor.execute(sourceCode)
 

@@ -11,6 +11,8 @@ import scala.collection.mutable
 
 object UserImplFlinkPython {
 
+
+
   def constructDFOCall(spec: JsValue, node: Node[DFOperator], in1: String, in2: String): String = {
     val opName = node.value.name
     val opSpec = spec \ opName
@@ -39,7 +41,7 @@ object UserImplFlinkPython {
   private def constructAggFollowup(node: Node[DFOperator], spec: JsValue, opName: String, opType: String, parameters: JsObject, args: List[String]): String = {
     val (table, col) = pickRandomColumnFromReachableSources(node)
     // Choose between sum, avg, count, etc.
-    val aggFuncs = Seq("sum", "avg", "count", "min", "max")
+    val aggFuncs = Seq("sum", "avg", "count", "min", "max", "udf")
     val chosenAggFunc = aggFuncs(scala.util.Random.nextInt(aggFuncs.length))
 
     val fullColName = constructFullColumnName(table, col)
@@ -53,6 +55,7 @@ object UserImplFlinkPython {
       case "count" => s"select(col('$fullColName').count.alias('$fullColName'))"
       case "min" => s"select(col('$fullColName').min.alias('$fullColName'))"
       case "max" => s"select(col('$fullColName').max.alias('$fullColName'))"
+      case "udf" => s"select(call('preloaded_udf_agg', col('$fullColName')).alias('$fullColName'))"
     }
 
   }
@@ -424,8 +427,119 @@ object UserImplFlinkPython {
     }
   }
 
+  def generateAggregationFunction(): String = {
+    Random.choice(
+      List(
+        """
+          |def preloaded_aggregation(values: pd.Series) -> int:
+          |    return len(values)
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.sum()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.mean()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.min()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.max()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.std()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.var()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.median()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.iloc[0] if len(values) > 0 else None
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.iloc[-1] if len(values) > 0 else None
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> int:
+          |    return values.nunique()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> int:
+          |    return values.count()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.skew()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.kurtosis()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.quantile(0.25)
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.quantile(0.75)
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.max() - values.min()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return values.product()
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    import numpy as np
+          |    return np.exp(np.log(values[values > 0]).mean()) if (values > 0).all() else None
+          |""".stripMargin,
+
+        """
+          |def preloaded_aggregation(values: pd.Series) -> float:
+          |    return len(values) / (1.0 / values).sum() if (values != 0).all() else None
+          |""".stripMargin
+      )
+    )
+  }
+
   def generatePreloadedUDF(): String = {
-    """
+    s"""
+      |from pyflink.table.udf import AggregateFunction, udaf
+      |from pyflink.table import DataTypes
+      |import pandas as pd
+      |
       |class MyObject:
       |    def __init__(self, name, value):
       |        self.name = name
@@ -443,6 +557,17 @@ object UserImplFlinkPython {
       |@udf(result_type=DataTypes.BOOLEAN())
       |def preloaded_udf_boolean(input_val):
       |    return True
+      |
+      |${generateAggregationFunction()}
+      |
+      |try:
+      |    table_env.drop_temporary_function("preloaded_udf_agg")
+      |except:
+      |    pass
+      |
+      |preloaded_udf_agg = udaf(preloaded_aggregation, result_type=DataTypes.BIGINT(), func_type="pandas")
+      |
+      |table_env.create_temporary_function("preloaded_udf_agg", preloaded_udf_agg)
       |""".stripMargin
   }
 

@@ -35,7 +35,14 @@ class SparkDataAdapter(config: FuzzerConfig) extends DataAdapter {
   }
 
   override def prepTableMetadata(sources: List[(Node[DFOperator], TableMetadata)]): List[(Node[DFOperator], TableMetadata)] = {
-    sources
+    sources.map { case (node, table) =>
+      val columns = table.columns.map(c => c.copy(name = s"${c.name}_${node.id}"))
+      (node, TableMetadata(
+        s"${table.identifier}_${node.id}",
+        columns,
+        table.metadata
+      ))
+    }
   }
 
 }

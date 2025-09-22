@@ -63,8 +63,8 @@ object UserImplSparkScala {
     val tpcdsTablesPath = fuzzer.core.global.State.config.get.localTpcdsPath
     val tableName = fuzzer.core.global.State.src2TableMap(node.id).identifier
     opName match {
-      case "spark.table" => s"""$opName("tpcds.$tableName").as("$tableName")"""
-      case "spark.read.parquet" => s"""$opName("$tpcdsTablesPath/$tableName").as("$tableName")"""
+      case "spark.table" => s"""$opName("tpcds.$tableName").select(spark.table("tpcds.$tableName").columns.map(colName => col(colName).alias(s"$${colName}_${node.id}")): _*).as("${tableName}_${node.id}")"""
+      case "spark.read.parquet" => s"""$opName("$tpcdsTablesPath/$tableName").as("${tableName}_${node.id}")"""
       case _ => s"$opName(${args.mkString(", ")})"
     }
   }

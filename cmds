@@ -13,3 +13,5 @@ java -jar jacoco-0.8.13/lib/jacococli.jar report coverage-dumps/coverage-dump_20
 python3 coverage-monitor.py --interval 300 --output-dir my-coverage-data
 python plot-coverage.py --libs lib-flink-filtered-java-11-only
 python plot-coverage.py --dump-dir coverage-dumps/dump-20250925_214644 --libs lib-spark-only/ --coverage-for "org\.apache\.spark\.sql\.catalyst\..*"
+java -jar jacoco-0.8.13/lib/jacococli.jar report coverage-dumps/dump-20250925_214644/coverage-dump_20250925_215747.exec --classfiles lib-spark-only/ --html coverage-report-html-spark/
+java -jar jacoco-0.8.13/lib/jacococli.jar report coverage-dumps/coverage-dump_20250925_133953.exec --classfiles lib-flink-filtered-java-11-only/ --html coverage-report-html-flink/

@@ -29,7 +29,9 @@ testFrameworks += new TestFramework("com.novocode.junit.JUnitFramework")
 
 lazy val root = (project in file("."))
   .settings(
-    name := "DAGFuzzerBetter"
+    name := "DAGFuzzerBetter",
+    Compile / scalaSource := sourceDirectory.value / "main" / "scala",
+    Test / scalaSource := sourceDirectory.value / "test" / "scala",
   )
 
 ThisBuild / assemblyMergeStrategy := {

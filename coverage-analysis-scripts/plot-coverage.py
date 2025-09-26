@@ -15,14 +15,30 @@ from matplotlib.ticker import LogLocator, LogFormatter
 # Set better matplotlib style
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
+EXPERIMENT_TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+DIR_EXPERIMENT_ROOT = Path(f"coverage-plotting-runs/exp-{EXPERIMENT_TIMESTAMP}")
+
+
+def print_and_log(*args, **kwargs):
+    log_file = DIR_EXPERIMENT_ROOT / "log.txt"
+
+    sep = kwargs.get("sep", " ")
+    end = kwargs.get("end", "\n")
+
+    text = sep.join(str(arg) for arg in args) + end
+
+    with open(log_file, "a") as f:
+        f.write(text)
+
+    print(*args, **kwargs)
+
 
 class CoveragePlotter:
     def __init__(self, dump_dir="coverage-dumps", jacoco_path="jacoco-0.8.13/lib/jacococli.jar", libs="lib/", coverage_pattern=None):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.dump_dir = Path(dump_dir)
         self.jacoco_path = jacoco_path
         self.libs = libs
-        self.reports_dir = Path(f"coverage-reports/{timestamp}")
+        self.reports_dir = DIR_EXPERIMENT_ROOT / "reports"
         self.coverage_pattern = re.compile(coverage_pattern) if coverage_pattern else None
 
         # Create reports directory
@@ -46,10 +62,10 @@ class CoveragePlotter:
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print(f"✓ Generated report for {dump_file.name}")
+            print_and_log(f"✓ Generated report for {dump_file.name}")
             return True
         except subprocess.CalledProcessError as e:
-            print(f"✗ Failed to generate report for {dump_file.name}: {e}")
+            print_and_log(f"✗ Failed to generate report for {dump_file.name}: {e}")
             return False
 
     def _filter_coverage_data(self, df):
@@ -65,7 +81,7 @@ class CoveragePlotter:
         existing_columns = [col for col in filter_columns if col in df.columns]
 
         if not existing_columns:
-            print(f"⚠️  Warning: No filterable columns found ({filter_columns}). Using all data.")
+            print_and_log(f"⚠️  Warning: No filterable columns found ({filter_columns}). Using all data.")
             return df
 
         # Create a mask for rows that match the pattern in any of the existing columns
@@ -79,10 +95,10 @@ class CoveragePlotter:
         filtered_df = df[mask]
 
         if len(filtered_df) == 0:
-            print(f"⚠️  Warning: No data matched pattern '{self.coverage_pattern.pattern}'. Using all data.")
+            print_and_log(f"⚠️  Warning: No data matched pattern '{self.coverage_pattern.pattern}'. Using all data.")
             return df
 
-        print(f"📊 Filtered from {len(df)} to {len(filtered_df)} rows matching pattern '{self.coverage_pattern.pattern}'")
+        print_and_log(f"📊 Filtered from {len(df)} to {len(filtered_df)} rows matching pattern '{self.coverage_pattern.pattern}'")
         return filtered_df
 
     def process_dumps(self):
@@ -92,13 +108,13 @@ class CoveragePlotter:
         dump_files = list(self.dump_dir.glob('coverage-dump_*.exec'))
 
         if not dump_files:
-            print(f"❌ No coverage dump files found in {self.dump_dir}")
-            print(f"   Looking for files matching pattern: coverage-dump_*.exec")
+            print_and_log(f"❌ No coverage dump files found in {self.dump_dir}")
+            print_and_log(f"   Looking for files matching pattern: coverage-dump_*.exec")
             return pd.DataFrame()
 
-        print(f"📁 Found {len(dump_files)} coverage dump files")
+        print_and_log(f"📁 Found {len(dump_files)} coverage dump files")
         if self.coverage_pattern:
-            print(f"🔍 Will filter coverage data using pattern: '{self.coverage_pattern.pattern}'")
+            print_and_log(f"🔍 Will filter coverage data using pattern: '{self.coverage_pattern.pattern}'")
 
         # Sort by timestamp
         dump_files.sort(key=lambda x: self._extract_timestamp_from_filename(x.name) or datetime.min)
@@ -109,12 +125,12 @@ class CoveragePlotter:
         for i, dump_file in enumerate(dump_files):
             timestamp = self._extract_timestamp_from_filename(dump_file.name)
             if not timestamp:
-                print(f"⚠️  Skipping {dump_file.name} - couldn't parse timestamp")
+                print_and_log(f"⚠️  Skipping {dump_file.name} - couldn't parse timestamp")
                 continue
 
             csv_file = self.reports_dir / f"report_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv"
 
-            print(f"🔄 Processing {dump_file.name} ({i+1}/{len(dump_files)})...")
+            print_and_log(f"🔄 Processing {dump_file.name} ({i+1}/{len(dump_files)})...")
 
             if self._run_jacoco_report(dump_file, csv_file):
                 try:
@@ -162,10 +178,10 @@ class CoveragePlotter:
                     })
 
                 except Exception as e:
-                    print(f"✗ Error processing {csv_file}: {e}")
+                    print_and_log(f"✗ Error processing {csv_file}: {e}")
 
         if not coverage_data:
-            print("❌ No valid coverage data found!")
+            print_and_log("❌ No valid coverage data found!")
             return pd.DataFrame()
 
         df_coverage = pd.DataFrame(coverage_data)
@@ -182,7 +198,7 @@ class CoveragePlotter:
         """Create comprehensive coverage vs time plots"""
 
         if df.empty:
-            print("❌ No data to plot!")
+            print_and_log("❌ No data to plot!")
             return
 
         # Determine time unit based on data range
@@ -222,7 +238,7 @@ class CoveragePlotter:
 
         ax1.set_xlabel(time_label, fontsize=12)
         ax1.set_ylabel('Coverage Percentage (%)', fontsize=12)
-        ax1.set_title(f'🎯 Coverage Over Time{title_suffix}', fontsize=14, fontweight='bold', pad=20)
+        ax1.set_title(f'Coverage Over Time{title_suffix}', fontsize=14, fontweight='bold', pad=20)
         ax1.legend(loc='best', fontsize=10)
         ax1.grid(True, alpha=0.3)
         ax1.set_ylim(0, max(df[['instruction_coverage_percent', 'line_coverage_percent',
@@ -236,7 +252,7 @@ class CoveragePlotter:
         ax2.plot(df[time_col], df['total_methods_covered'], '^-', label='Methods', linewidth=2)
         ax2.set_xlabel(time_label, fontsize=10)
         ax2.set_ylabel('Elements Covered', fontsize=10)
-        ax2.set_title('📊 Absolute Coverage Counts', fontsize=12, fontweight='bold')
+        ax2.set_title('Absolute Coverage Counts', fontsize=12, fontweight='bold')
         ax2.legend(fontsize=9)
         ax2.grid(True, alpha=0.3)
 
@@ -257,7 +273,7 @@ class CoveragePlotter:
 
         ax3.set_xlabel(time_label, fontsize=10)
         ax3.set_ylabel('Coverage Change (%)', fontsize=10)
-        ax3.set_title('📈 Coverage Growth Rate', fontsize=12, fontweight='bold')
+        ax3.set_title('Coverage Growth Rate', fontsize=12, fontweight='bold')
         ax3.grid(True, alpha=0.3)
 
         # Instruction coverage breakdown (stacked area)
@@ -271,7 +287,7 @@ class CoveragePlotter:
 
         ax4.set_xlabel(time_label, fontsize=12)
         ax4.set_ylabel('Total Instructions', fontsize=12)
-        ax4.set_title('🏗️ Instruction Coverage Breakdown', fontsize=12, fontweight='bold')
+        ax4.set_title('Instruction Coverage Breakdown', fontsize=12, fontweight='bold')
         ax4.legend(fontsize=10)
         ax4.grid(True, alpha=0.3)
 
@@ -289,11 +305,10 @@ class CoveragePlotter:
         fig.text(0.02, 0.02, metadata_text, fontsize=8, alpha=0.7)
 
         if save_plots:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filter_suffix = f"_filtered_{re.sub(r'[^a-zA-Z0-9]', '_', self.coverage_pattern.pattern)}" if self.coverage_pattern else ""
-            filename = f"coverage_timeline_{timestamp}{filter_suffix}.png"
+            filename = DIR_EXPERIMENT_ROOT / f"coverage_timeline_{filter_suffix}.png"
             plt.savefig(filename, dpi=300, bbox_inches='tight')
-            print(f"📊 Plot saved to {filename}")
+            print_and_log(f"📊 Plot saved to {filename}")
 
         if show_plots:
             plt.show()
@@ -305,25 +320,25 @@ class CoveragePlotter:
         if df.empty:
             return
 
-        print("\n" + "="*60)
-        print("📈 COVERAGE ANALYSIS SUMMARY REPORT")
+        print_and_log("\n" + "="*60)
+        print_and_log("📈 COVERAGE ANALYSIS SUMMARY REPORT")
         if self.coverage_pattern:
-            print(f"🔍 FILTERED BY PATTERN: {self.coverage_pattern.pattern}")
-        print("="*60)
+            print_and_log(f"🔍 FILTERED BY PATTERN: {self.coverage_pattern.pattern}")
+        print_and_log("="*60)
 
         # Basic info
         total_duration = df['timestamp'].iloc[-1] - df['timestamp'].iloc[0]
-        print(f"📅 Analysis Period: {df['timestamp'].iloc[0].strftime('%Y-%m-%d %H:%M:%S')} to {df['timestamp'].iloc[-1].strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"⏱️  Total Duration: {total_duration}")
-        print(f"📊 Data Points: {len(df)}")
+        print_and_log(f"📅 Analysis Period: {df['timestamp'].iloc[0].strftime('%Y-%m-%d %H:%M:%S')} to {df['timestamp'].iloc[-1].strftime('%Y-%m-%d %H:%M:%S')}")
+        print_and_log(f"⏱️  Total Duration: {total_duration}")
+        print_and_log(f"📊 Data Points: {len(df)}")
 
         # Coverage summary
-        print(f"\n🎯 FINAL COVERAGE METRICS:")
+        print_and_log(f"\n🎯 FINAL COVERAGE METRICS:")
         final = df.iloc[-1]
-        print(f"   • Instruction Coverage: {final['instruction_coverage_percent']:.2f}%")
-        print(f"   • Line Coverage: {final['line_coverage_percent']:.2f}%")
-        print(f"   • Method Coverage: {final['method_coverage_percent']:.2f}%")
-        print(f"   • Branch Coverage: {final['branch_coverage_percent']:.2f}%")
+        print_and_log(f"   • Instruction Coverage: {final['instruction_coverage_percent']:.2f}%")
+        print_and_log(f"   • Line Coverage: {final['line_coverage_percent']:.2f}%")
+        print_and_log(f"   • Method Coverage: {final['method_coverage_percent']:.2f}%")
+        print_and_log(f"   • Branch Coverage: {final['branch_coverage_percent']:.2f}%")
 
         # Progress analysis
         if len(df) > 1:
@@ -331,21 +346,20 @@ class CoveragePlotter:
             improvement_inst = final['instruction_coverage_percent'] - initial['instruction_coverage_percent']
             improvement_line = final['line_coverage_percent'] - initial['line_coverage_percent']
 
-            print(f"\n📊 PROGRESS ANALYSIS:")
-            print(f"   • Instruction Coverage Improvement: {improvement_inst:+.2f}%")
-            print(f"   • Line Coverage Improvement: {improvement_line:+.2f}%")
+            print_and_log(f"\n📊 PROGRESS ANALYSIS:")
+            print_and_log(f"   • Instruction Coverage Improvement: {improvement_inst:+.2f}%")
+            print_and_log(f"   • Line Coverage Improvement: {improvement_line:+.2f}%")
 
             # Peak coverage
             max_inst = df['instruction_coverage_percent'].max()
             max_inst_time = df.loc[df['instruction_coverage_percent'].idxmax(), 'timestamp']
-            print(f"   • Peak Instruction Coverage: {max_inst:.2f}% at {max_inst_time.strftime('%H:%M:%S')}")
+            print_and_log(f"   • Peak Instruction Coverage: {max_inst:.2f}% at {max_inst_time.strftime('%H:%M:%S')}")
 
         # Save detailed CSV
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filter_suffix = f"_filtered_{re.sub(r'[^a-zA-Z0-9]', '_', self.coverage_pattern.pattern)}" if self.coverage_pattern else ""
-        csv_filename = f"coverage_timeline_detailed_{timestamp}{filter_suffix}.csv"
+        csv_filename = DIR_EXPERIMENT_ROOT / f"coverage_timeline_detailed_{filter_suffix}.csv"
         df.to_csv(csv_filename, index=False)
-        print(f"\n💾 Detailed data saved to: {csv_filename}")
+        print_and_log(f"\n💾 Detailed data saved to: {csv_filename}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -405,7 +419,7 @@ Examples:
     )
 
     parser.add_argument(
-        '--no-show',
+        '--show',
         action='store_true',
         help='Don\'t display plots interactively, only save them'
     )
@@ -423,20 +437,20 @@ Examples:
         try:
             re.compile(args.coverage_for)
         except re.error as e:
-            print(f"❌ Error: Invalid regex pattern '{args.coverage_for}': {e}")
+            print_and_log(f"❌ Error: Invalid regex pattern '{args.coverage_for}': {e}")
             return 1
 
     # Validate paths
     if not Path(args.jacoco_path).exists():
-        print(f"❌ Error: JaCoCo CLI not found at {args.jacoco_path}")
+        print_and_log(f"❌ Error: JaCoCo CLI not found at {args.jacoco_path}")
         return 1
 
     if not Path(args.dump_dir).exists():
-        print(f"❌ Error: Dump directory not found: {args.dump_dir}")
+        print_and_log(f"❌ Error: Dump directory not found: {args.dump_dir}")
         return 1
 
     if not Path(args.libs).exists():
-        print(f"❌ Error: libraries directory not found: {args.libs}")
+        print_and_log(f"❌ Error: libraries directory not found: {args.libs}")
         return 1
 
     # Create plotter and process data
@@ -447,29 +461,29 @@ Examples:
         coverage_pattern=args.coverage_for
     )
 
-    print("🚀 Starting Coverage Analysis...")
-    print("="*50)
+    print_and_log("🚀 Starting Coverage Analysis...")
+    print_and_log("="*50)
 
     # Process coverage dumps
     df = plotter.process_dumps()
 
     if df.empty:
-        print("❌ No coverage data found to plot!")
+        print_and_log("❌ No coverage data found to plot!")
         return 1
 
-    print(f"✅ Successfully processed {len(df)} coverage snapshots")
+    print_and_log(f"✅ Successfully processed {len(df)} coverage snapshots")
 
     # Create plots
     plotter.create_plots(
         df,
-        show_plots=not args.no_show,
+        show_plots=args.show,
         save_plots=not args.no_save
     )
 
     # Generate summary report
     plotter.generate_summary_report(df)
 
-    print("\n🎉 Analysis complete!")
+    print_and_log("\n🎉 Analysis complete!")
     return 0
 
 if __name__ == "__main__":

@@ -24,3 +24,4 @@ plot-jacoco-coverage.py
 *.png
 *.csv
 *.excluded
+coverage-plotting-runs/

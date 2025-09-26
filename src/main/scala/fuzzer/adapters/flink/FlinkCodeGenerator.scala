@@ -286,7 +286,7 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   override def setupEnvironment(): () => Unit = {
     // Set JaCoCo agent for all JVMs started by this process and its children
-    val jacocoAgent = "-javaagent:/home/ahmad/Documents/project/dag-fuzzer-better/jacoco-0.8.13/lib/jacocoagent.jar=destfile=pyflink-coverage.exec,append=false,dumponexit=true,output=tcpserver,port=6300"
+    val jacocoAgent = "-javaagent:jacoco-0.8.13/lib/jacocoagent.jar=destfile=pyflink-coverage.exec,append=false,dumponexit=true,output=tcpserver,port=6300"
     val currentJavaOpts = sys.env.getOrElse("JAVA_TOOL_OPTIONS", "")
     val newJavaOpts = if (currentJavaOpts.isEmpty) jacocoAgent else s"$currentJavaOpts $jacocoAgent"
 

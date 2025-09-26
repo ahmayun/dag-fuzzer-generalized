@@ -22,7 +22,7 @@ class CoverageMonitor:
         self.dump_count = 0
 
         # Create output directory
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)

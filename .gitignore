@@ -3,7 +3,7 @@ tpcds-data/
 spark-warehouse/
 .bsp/
 .idea/
-lib/
+lib*/
 metastore_db/
 dag-gen/
 derby.log
@@ -15,3 +15,12 @@ venv/
 error_analysis/
 flink-exceptions.txt
 tpcds-csv.zip
+coverage-dumps/
+coverage-report*/
+jacoco-*/
+results/potential-bugs/interesting-mismatches/
+*.exec
+plot-jacoco-coverage.py
+*.png
+*.csv
+*.excluded

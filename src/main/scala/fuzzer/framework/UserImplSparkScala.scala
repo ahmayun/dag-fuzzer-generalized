@@ -324,6 +324,144 @@ object UserImplSparkScala {
     }
   }
 
+  def chooseUdfSuffixBasedOnType(col: ColumnMetadata): String = {
+    col.dataType.name match {
+      case "Date" => "String"
+      case "Long" | "Boolean" => "Integer"
+      case "Float" => "Decimal"
+      case t => t
+    }
+  }
+
+  def generateFilterUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
+    val fullColExpressions = args.map{case (table, col) => s"""col("${constructFullColumnName(table, col)}")"""}
+    val col = args.head._2 // for now we only have single arg udfs so we can assume the list has one element
+    val chosenType = chooseUdfSuffixBasedOnType(col)
+    s"filterUdf$chosenType(${fullColExpressions.mkString(",")})"
+  }
+
+  def generateStringFilterUDF(): String = {
+    // String Filter UDFs
+    val stringFilters = List(
+      """
+        |val filterUdfString = udf((arg: String) => {
+        |  arg.length > 5
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfString = udf((arg: String) => {
+        |  arg.startsWith("A") || arg.startsWith("a")
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfString = udf((arg: String) => {
+        |  arg.toLowerCase.contains("test")
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfString = udf((arg: String) => {
+        |  arg.forall(_.isLetter) && arg.length < 10
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfString = udf((arg: String) => {
+        |  arg.count(_ == 'e') >= 2
+        |}).asNondeterministic()
+        |""".stripMargin
+    )
+    Random.choice(stringFilters)
+  }
+
+  def generateIntFilterUDF(): String = {
+    // Integer Filter UDFs
+    val intFilters = List(
+      """
+        |val filterUdfInteger = udf((arg: Int) => {
+        |  arg > 0 && arg % 2 == 0
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfInteger = udf((arg: Int) => {
+        |  arg >= 10 && arg <= 100
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfInteger = udf((arg: Int) => {
+        |  arg % 3 == 0 || arg % 5 == 0
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfInteger = udf((arg: Int) => {
+        |  arg.toString == arg.toString.reverse
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfInteger = udf((arg: Int) => {
+        |  arg > 0 && (arg & (arg - 1)) == 0
+        |}).asNondeterministic()
+        |""".stripMargin
+    )
+
+    Random.choice(intFilters)
+  }
+
+  def generateDecimalFilterUDF(): String = {
+    // Decimal Filter UDFs
+    val decimalFilters = List(
+      """
+        |val filterUdfDecimal = udf((arg: Double) => {
+        |  arg > 0.0 && arg < 1000.0
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfDecimal = udf((arg: Double) => {
+        |  (scala.math.round(arg * 100).toDouble / 100.0) == arg
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfDecimal = udf((arg: Double) => {
+        |  arg >= 50.5 && arg.toInt % 10 == 5
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfDecimal = udf((arg: Double) => {
+        |  (arg * 100) % 25 == 0
+        |}).asNondeterministic()
+        |""".stripMargin,
+
+      """
+        |val filterUdfDecimal = udf((arg: Double) => {
+        |  scala.math.abs(arg - scala.math.round(arg).toDouble) > 0.1
+        |}).asNondeterministic()
+        |""".stripMargin
+    )
+
+    Random.choice(decimalFilters)
+  }
+
+
+  def generateComplexUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
+    val fullColExpressions = args.map{case (table, col) => s"""col("${constructFullColumnName(table, col)}")"""}
+    s"preloadedUDF(${fullColExpressions.mkString(",")})"
+  }
+
+  def generateUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
+    if(node.value.name.contains("filter"))
+      generateFilterUDFCall(node, args)
+    else
+      generateComplexUDFCall(node, args)
+  }
   def generateSingleColumnExpression(
                                       node: Node[DFOperator],
                                       param: JsLookupResult,
@@ -333,7 +471,7 @@ object UserImplSparkScala {
 
     val config = fuzzer.core.global.State.config.get
     val prob = config.probUDFInsert
-    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val chosenTuple@(table, col) = pickRandomColumnFromReachableSources(node)
     val fullColName = constructFullColumnName(table, col)
     val colExpr = s"""col("$fullColName")"""
 
@@ -346,9 +484,9 @@ object UserImplSparkScala {
     val floatExpr = s"$colExpr $op $floatValue"
     val stringExpr = s"length($colExpr) $op 5"
     val boolExpr = s"!$colExpr"
-    val udfExpr = s"preloadedUDF($colExpr)"
+    val udfExpr = generateUDFCall(node, List(chosenTuple))
 
-    if (Random.nextFloat() < prob && !node.value.name.contains("filter")) {
+    if (Random.nextFloat() < prob) {
       udfExpr
     } else {
       col.dataType match {
@@ -413,11 +551,22 @@ object UserImplSparkScala {
     }
   }
 
+  def generatePreamble(): String = {
+    s"""
+      |${generateStringFilterUDF()}
+      |
+      |${generateIntFilterUDF()}
+      |
+      |${generateDecimalFilterUDF()}
+      |""".stripMargin
+  }
+
   def dag2SparkScala(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
     val l = mutable.ListBuffer[String]()
     val variablePrefix = "auto"
     val finalVariableName = "sink"
 
+    l += generatePreamble()
 
     graph.traverseTopological { node =>
       node.value.varName = s"$variablePrefix${node.id}"

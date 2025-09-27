@@ -3,7 +3,7 @@ package fuzzer.framework
 import fuzzer.code.SourceCode
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
-import fuzzer.data.types.DataType
+import fuzzer.data.types.{BooleanType, DataType}
 import fuzzer.utils.random.Random
 import play.api.libs.json._
 
@@ -315,13 +315,24 @@ object UserImplFlinkPython {
     s"col('$fullColName')"
   }
 
-  def generateUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
+  def generateFilterUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
     val fullColExpressions = args.map{case (table, col) => s"col('${constructFullColumnName(table, col)}')"}
+    val col = args.head._2 // for now we only have single arg udfs so we can assume the list has one element
+    val chosenType = col.dataType.name.toLowerCase
+    s"filter_udf_$chosenType(${fullColExpressions.mkString(",")})"
+  }
+
+  def generateComplexUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
+    val fullColExpressions = args.map{case (table, col) => s"col('${constructFullColumnName(table, col)}')"}
+    s"preloaded_udf_complex(${fullColExpressions.mkString(",")})"
+  }
+
+  def generateUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
 
     if(node.value.name.contains("filter"))
-      s"preloaded_udf_boolean(${fullColExpressions.mkString(",")})"
+      generateFilterUDFCall(node, args)
     else
-      s"preloaded_udf_complex(${fullColExpressions.mkString(",")})"
+      generateComplexUDFCall(node, args)
   }
 
   def generateSingleColumnExpression(
@@ -534,12 +545,104 @@ object UserImplFlinkPython {
     )
   }
 
-  def generatePreloadedUDF(): String = {
-    s"""
-      |from pyflink.table.udf import AggregateFunction, udaf
-      |from pyflink.table import DataTypes
-      |import pandas as pd
-      |
+  def generateStringFilterUDF(): String = {
+    // String Filter UDFs
+    val stringFilters = List(
+      """
+        |def filter_udf_string(arg):
+        |    return len(arg) > 5
+        |""".stripMargin,
+
+      """
+        |def filter_udf_string(arg):
+        |    return arg.startswith('A') or arg.startswith('a')
+        |""".stripMargin,
+
+      """
+        |def filter_udf_string(arg):
+        |    return 'test' in arg.lower()
+        |""".stripMargin,
+
+      """
+        |def filter_udf_string(arg):
+        |    return arg.isalpha() and len(arg) < 10
+        |""".stripMargin,
+
+      """
+        |def filter_udf_string(arg):
+        |    return arg.count('e') >= 2
+        |""".stripMargin
+    )
+    Random.choice(stringFilters)
+  }
+
+  def generateIntFilterUDF(): String = {
+
+    // Integer Filter UDFs
+    val intFilters = List(
+      """
+        |def filter_udf_integer(arg):
+        |    return arg > 0 and arg % 2 == 0
+        |""".stripMargin,
+
+      """
+        |def filter_udf_integer(arg):
+        |    return arg >= 10 and arg <= 100
+        |""".stripMargin,
+
+      """
+        |def filter_udf_integer(arg):
+        |    return arg % 3 == 0 or arg % 5 == 0
+        |""".stripMargin,
+
+      """
+        |def filter_udf_integer(arg):
+        |    return str(arg)[::-1] == str(arg)
+        |""".stripMargin,
+
+      """
+        |def filter_udf_integer(arg):
+        |    return arg > 0 and (arg & (arg - 1)) == 0
+        |""".stripMargin
+    )
+
+    Random.choice(intFilters)
+  }
+
+  def generateDecimalFilterUDF(): String = {
+    // Decimal Filter UDFs
+    val decimalFilters = List(
+      """
+        |def filter_udf_decimal(arg):
+        |    return arg > 0.0 and arg < 1000.0
+        |""".stripMargin,
+
+      """
+        |def filter_udf_decimal(arg):
+        |    return round(arg, 2) == arg
+        |""".stripMargin,
+
+      """
+        |def filter_udf_decimal(arg):
+        |    return arg >= 50.5 and int(arg) % 10 == 5
+        |""".stripMargin,
+
+      """
+        |def filter_udf_decimal(arg):
+        |    return arg * 100 % 25 == 0
+        |""".stripMargin,
+
+      """
+        |def filter_udf_decimal(arg):
+        |    return abs(arg - round(arg)) > 0.1
+        |""".stripMargin
+    )
+
+    Random.choice(decimalFilters)
+  }
+
+  def generateComplexFilterUDF(): String = {
+    """
       |class MyObject:
       |    def __init__(self, name, value):
       |        self.name = name
@@ -553,10 +656,25 @@ object UserImplFlinkPython {
       |def preloaded_udf_complex(*input_val):
       |    obj = MyObject("test", hash(input_val[0]))
       |    return (obj.name, obj.value)  # Return as tuple
+      |""".stripMargin
+  }
+
+  def generatePreloadedUDF(): String = {
+    s"""
+      |from pyflink.table.udf import AggregateFunction, udaf
+      |from pyflink.table import DataTypes
+      |import pandas as pd
+      |
+      |${generateComplexFilterUDF()}
       |
       |@udf(result_type=DataTypes.BOOLEAN())
-      |def preloaded_udf_boolean(input_val):
-      |    return True
+      |${generateStringFilterUDF()}
+      |
+      |@udf(result_type=DataTypes.BOOLEAN())
+      |${generateIntFilterUDF()}
+      |
+      |@udf(result_type=DataTypes.BOOLEAN())
+      |${generateDecimalFilterUDF()}
       |
       |${generateAggregationFunction()}
       |

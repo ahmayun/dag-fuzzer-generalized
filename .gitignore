@@ -25,3 +25,5 @@ plot-jacoco-coverage.py
 *.csv
 *.excluded
 coverage-plotting-runs/
+cluster-results/
+dask-server-log/

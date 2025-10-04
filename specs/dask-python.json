@@ -1,0 +1,188 @@
+{
+  "dd.read_csv": {
+    "type": "source",
+    "parameters": {
+      "path": {
+        "type": "string",
+        "required": true
+      },
+      "blocksize": {
+        "type": "string",
+        "required": true,
+        "default": "64MB"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "merge": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "DataFrame",
+        "required": true
+      },
+      "on": {
+        "type": "str|list[str]",
+        "required": true
+      },
+      "left_on": {
+        "type": "str|list[str]",
+        "required": true
+      },
+      "right_on": {
+        "type": "str|list[str]",
+        "required": true
+      },
+      "how": {
+        "type": "str",
+        "required": true,
+        "default": "inner",
+        "values": ["inner", "left", "right", "outer"]
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "groupby": {
+    "type": "unary",
+    "parameters": {
+      "by": {
+        "type": "str|list[str]",
+        "required": true
+      }
+    },
+    "returns": "GroupBy"
+  },
+  "map_partitions": {
+    "type": "unary",
+    "parameters": {
+      "func": {
+        "type": "callable",
+        "required": true
+      },
+      "meta": {
+        "type": "dict|DataFrame",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "query": {
+    "type": "unary",
+    "parameters": {
+      "expr": {
+        "type": "str",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "loc": {
+    "type": "unary",
+    "parameters": {
+      "indexer": {
+        "type": "Expression",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "rename": {
+    "type": "unary",
+    "parameters": {
+      "columns": {
+        "type": "dict[str,str]",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-rename"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "sort_values": {
+    "type": "unary",
+    "parameters": {
+      "by": {
+        "type": "str|list[str]",
+        "required": true
+      },
+      "ascending": {
+        "type": "bool|list[bool]",
+        "required": true,
+        "default": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "drop_duplicates": {
+    "type": "unary",
+    "parameters": {
+      "subset": {
+        "type": "str|list[str]",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "head": {
+    "type": "unary",
+    "parameters": {
+      "n": {
+        "type": "int",
+        "required": true,
+        "default": 5
+      },
+      "compute": {
+        "type": "bool",
+        "required": true,
+        "default": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "fillna": {
+    "type": "unary",
+    "parameters": {
+      "value": {
+        "type": "scalar|dict",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "dropna": {
+    "type": "unary",
+    "parameters": {
+      "subset": {
+        "type": "list[str]",
+        "required": true
+      },
+      "how": {
+        "type": "str",
+        "required": true,
+        "default": "any",
+        "values": ["any", "all"]
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "repartition": {
+    "type": "unary",
+    "parameters": {
+      "npartitions": {
+        "type": "int",
+        "required": true
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "persist": {
+    "type": "unary",
+    "parameters": {},
+    "returns": "DataFrame"
+  },
+  "compute": {
+    "type": "unary",
+    "parameters": {},
+    "returns": "pandas.DataFrame"
+  }
+}

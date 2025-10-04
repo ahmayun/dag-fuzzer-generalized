@@ -197,6 +197,8 @@ class CoveragePlotter:
     def create_plots(self, df, show_plots=True, save_plots=True):
         """Create comprehensive coverage vs time plots"""
 
+        print("PLOTTING DF:")
+        print(df.head())
         if df.empty:
             print_and_log("❌ No data to plot!")
             return
@@ -210,9 +212,17 @@ class CoveragePlotter:
             time_col = 'time_elapsed_hours'
             time_label = 'Time Elapsed (hours)'
 
-        # Set up log scale for time axis (add small offset to avoid log(0))
-        time_offset = 0.1 if time_col == 'time_elapsed_minutes' else 0.01
+        # Use linear scale for small datasets or when max time is small
+        use_log_scale = len(df) > 5 and total_minutes > 10
+
+        # Handle the time=0 issue - always add small offset to avoid log(0) issues
         df_plot = df.copy()
+        if time_col == 'time_elapsed_minutes':
+            time_offset = 0.1  # 0.1 minutes = 6 seconds
+        else:
+            time_offset = 0.01  # 0.01 hours = 36 seconds
+
+        # Add offset to handle time=0, regardless of scale type
         df_plot[time_col] = df_plot[time_col] + time_offset
 
         # Create figure with subplots
@@ -225,31 +235,51 @@ class CoveragePlotter:
 
         # Main coverage percentages plot (larger)
         ax1 = plt.subplot2grid((3, 2), (0, 0), colspan=2)
-        ax1.set_xscale('log')
+        if use_log_scale:
+            ax1.set_xscale('log')
 
-        ax1.plot(df[time_col], df['instruction_coverage_percent'], 'o-',
-                label='Instruction Coverage', linewidth=2.5, markersize=6)
-        ax1.plot(df[time_col], df['line_coverage_percent'], 's-',
-                label='Line Coverage', linewidth=2.5, markersize=6)
-        ax1.plot(df[time_col], df['method_coverage_percent'], '^-',
-                label='Method Coverage', linewidth=2.5, markersize=6)
-        ax1.plot(df[time_col], df['branch_coverage_percent'], 'd-',
-                label='Branch Coverage', linewidth=2.5, markersize=6)
+        # Use larger markers and thicker lines for better visibility with few data points
+        marker_size = 8 if len(df) <= 5 else 6
+        line_width = 3 if len(df) <= 5 else 2.5
+
+        ax1.plot(df_plot[time_col], df['instruction_coverage_percent'], 'o-',
+                label='Instruction Coverage', linewidth=line_width, markersize=marker_size)
+        ax1.plot(df_plot[time_col], df['line_coverage_percent'], 's-',
+                label='Line Coverage', linewidth=line_width, markersize=marker_size)
+        ax1.plot(df_plot[time_col], df['method_coverage_percent'], '^-',
+                label='Method Coverage', linewidth=line_width, markersize=marker_size)
+        ax1.plot(df_plot[time_col], df['branch_coverage_percent'], 'd-',
+                label='Branch Coverage', linewidth=line_width, markersize=marker_size)
 
         ax1.set_xlabel(time_label, fontsize=12)
         ax1.set_ylabel('Coverage Percentage (%)', fontsize=12)
         ax1.set_title(f'Coverage Over Time{title_suffix}', fontsize=14, fontweight='bold', pad=20)
         ax1.legend(loc='best', fontsize=10)
         ax1.grid(True, alpha=0.3)
-        ax1.set_ylim(0, max(df[['instruction_coverage_percent', 'line_coverage_percent',
-                              'method_coverage_percent', 'branch_coverage_percent']].max()) * 1.05)
+
+        # Set y-axis limits with some padding to show small changes better
+        max_coverage = df[['instruction_coverage_percent', 'line_coverage_percent',
+                          'method_coverage_percent', 'branch_coverage_percent']].max().max()
+        min_coverage = df[['instruction_coverage_percent', 'line_coverage_percent',
+                          'method_coverage_percent', 'branch_coverage_percent']].min().min()
+
+        # Add padding to see small changes better
+        padding = (max_coverage - min_coverage) * 0.1
+        if padding < 1:  # Minimum padding of 1%
+            padding = 1
+
+        ax1.set_ylim(max(0, min_coverage - padding), max_coverage + padding)
 
         # Absolute counts
         ax2 = plt.subplot2grid((3, 2), (1, 0))
-        ax2.set_xscale('log')
-        ax2.plot(df[time_col], df['total_instructions_covered'], 'o-', label='Instructions', linewidth=2)
-        ax2.plot(df[time_col], df['total_lines_covered'], 's-', label='Lines', linewidth=2)
-        ax2.plot(df[time_col], df['total_methods_covered'], '^-', label='Methods', linewidth=2)
+        if use_log_scale:
+            ax2.set_xscale('log')
+        ax2.plot(df_plot[time_col], df['total_instructions_covered'], 'o-', label='Instructions',
+                 linewidth=2, markersize=marker_size)
+        ax2.plot(df_plot[time_col], df['total_lines_covered'], 's-', label='Lines',
+                 linewidth=2, markersize=marker_size)
+        ax2.plot(df_plot[time_col], df['total_methods_covered'], '^-', label='Methods',
+                 linewidth=2, markersize=marker_size)
         ax2.set_xlabel(time_label, fontsize=10)
         ax2.set_ylabel('Elements Covered', fontsize=10)
         ax2.set_title('Absolute Coverage Counts', fontsize=12, fontweight='bold')
@@ -258,13 +288,16 @@ class CoveragePlotter:
 
         # Coverage growth rate
         ax3 = plt.subplot2grid((3, 2), (1, 1))
-        ax3.set_xscale('log')
+        if use_log_scale:
+            ax3.set_xscale('log')
         if len(df) > 1:
             inst_growth = df['instruction_coverage_percent'].diff()
             line_growth = df['line_coverage_percent'].diff()
 
-            ax3.plot(df[time_col][1:], inst_growth[1:], 'o-', label='Instruction Growth', linewidth=2)
-            ax3.plot(df[time_col][1:], line_growth[1:], 's-', label='Line Growth', linewidth=2)
+            ax3.plot(df_plot[time_col][1:], inst_growth[1:], 'o-', label='Instruction Growth',
+                     linewidth=2, markersize=marker_size)
+            ax3.plot(df_plot[time_col][1:], line_growth[1:], 's-', label='Line Growth',
+                     linewidth=2, markersize=marker_size)
             ax3.axhline(y=0, color='black', linestyle='--', alpha=0.5)
             ax3.legend(fontsize=9)
         else:
@@ -278,11 +311,12 @@ class CoveragePlotter:
 
         # Instruction coverage breakdown (stacked area)
         ax4 = plt.subplot2grid((3, 2), (2, 0), colspan=2)
-        ax4.set_xscale('log')
+        if use_log_scale:
+            ax4.set_xscale('log')
 
-        ax4.fill_between(df[time_col], 0, df['total_instructions_covered'],
+        ax4.fill_between(df_plot[time_col], 0, df['total_instructions_covered'],
                         alpha=0.7, label='Covered Instructions', color='green')
-        ax4.fill_between(df[time_col], df['total_instructions_covered'], df['total_instructions'],
+        ax4.fill_between(df_plot[time_col], df['total_instructions_covered'], df['total_instructions'],
                         alpha=0.7, label='Missed Instructions', color='red')
 
         ax4.set_xlabel(time_label, fontsize=12)

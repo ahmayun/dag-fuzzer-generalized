@@ -151,7 +151,7 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         """Log warning when table has no schema definition"""
         print(f"Warning: No schema defined for table '{table_name}'. Skipping.")
 
-    def setup_flink_environment(self):
+    def setup_flink_environment(self, catalog_name=None):
         """Setup the Flink environment once with all TPCDS CSV tables"""
         self._log_setup_start()
 
@@ -159,9 +159,9 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
             tables = self._discover_and_log_tables()
             opt_table_env = self._create_table_environment()
             unopt_table_env = self._create_unopt_table_env()
-            self._register_all_tables(opt_table_env, tables)
-            self._register_all_tables(unopt_table_env, tables)
-#             self._verify_all_tables(opt_table_env, tables)
+            self._register_all_tables(opt_table_env, tables, catalog_name)
+            self._register_all_tables(unopt_table_env, tables, catalog_name)
+#             self._verify_all_tables(opt_table_env, tables, catalog_name)
 
             namespace = self._build_namespace(opt_table_env, unopt_table_env)
             self._log_setup_success()
@@ -286,24 +286,36 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
         return TableEnvironment.create(settings)
 
-    def _register_all_tables(self, table_env, tables):
+    def _register_all_tables(self, table_env, tables, catalog_name=None):
         """Register all discovered tables with the table environment"""
-        for table_name, table_path in tables.items():
-            self._register_single_table(table_env, table_name, table_path)
+        if catalog_name:
+            self.setup_catalog_and_database(table_env, catalog_name)
 
-    def _register_single_table(self, table_env, table_name, table_path):
+        for table_name, table_path in tables.items():
+            self._register_single_table(table_env, table_name, table_path, catalog_name)
+
+    def _register_single_table(self, table_env, table_name, table_path, catalog_name=None):
         """Register a single table with the Flink environment"""
         print(f"[{datetime.now()}] Registering table: {table_name}")
 
-        create_table_sql = self._build_create_table_sql(table_name, table_path)
+        create_table_sql = self._build_create_table_sql(table_name, table_path, catalog_name)
         table_env.execute_sql(create_table_sql)
 
-    def _build_create_table_sql(self, table_name, table_path):
+    def setup_catalog_and_database(self, table_env, catalog_name):
+        """Set up catalog and database structure"""
+        table_env.execute_sql(f"""
+            CREATE DATABASE IF NOT EXISTS {catalog_name}
+        """)
+
+        table_env.use_database(catalog_name)
+
+    def _build_create_table_sql(self, table_name, table_path, catalog_name=None):
         """Build the CREATE TABLE SQL statement for a given table"""
         schema_def = ', '.join(GLOBAL_STATE.table_schemas[table_name])
+        full_table_name = f"{catalog_name}.{table_name}" if catalog_name else table_name
 
         return f"""
-        CREATE TEMPORARY TABLE {table_name} (
+        CREATE TEMPORARY TABLE {full_table_name} (
             {schema_def}
         ) WITH (
             'connector' = 'filesystem',
@@ -316,12 +328,13 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         )
         """
 
-    def _verify_all_tables(self, table_env, tables):
+    def _verify_all_tables(self, table_env, tables, catalog_name=None):
         """Verify all registered tables are working correctly"""
         print(f"[{datetime.now()}] Verifying TPCDS tables...")
 
         for table_name in tables.keys():
-            self._verify_single_table(table_env, table_name)
+            full_table_name = f"{catalog_name}.{table_name}" if catalog_name else table_name
+            self._verify_single_table(table_env, full_table_name)
 
         print(f"[{datetime.now()}] Table verification complete.")
 
@@ -396,7 +409,7 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
             error_name = type(e).__name__
             return error_name
 
-    def execute_flink_code(self, received_code):
+    def execute_flink_code(self, received_code, code_type):
         """Execute the received code in the pre-initialized Flink namespace"""
 
         try:
@@ -404,7 +417,7 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
             if namespace is None:
                 return self._create_setup_error_result()
 
-            execution_result = self._execute_code_with_capture(received_code, namespace)
+            execution_result = self._execute_code_with_capture(received_code, namespace, code_type)
             self._log_execution_outputs(execution_result)
             return execution_result
 
@@ -442,35 +455,39 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
             'final_program': ""
         }
 
-    def _execute_code_with_capture(self, code, namespace):
+    def _execute_code_with_capture(self, code, namespace, code_type):
         """Execute code with output capture and error handling"""
         print(f"[{datetime.now()}] Executing received code...")
 
         stdout_capture_opt, stderr_capture_opt = self._create_output_captures()
         with redirect_stdout(stdout_capture_opt), redirect_stderr(stderr_capture_opt):
-            result_opt = self._try_execute_code_as_is(code, namespace)
+            result_opt = self._try_execute_code_as_is(code, namespace, code_type)
         result_opt = {**result_opt, "stdout": stdout_capture_opt.getvalue(), "stderr": stderr_capture_opt.getvalue()}
 
         stdout_capture_unopt, stderr_capture_unopt = self._create_output_captures()
         with redirect_stdout(stdout_capture_unopt), redirect_stderr(stderr_capture_unopt):
-            result_unopt = self._try_execute_code_unopt(code, namespace)
+            result_unopt = self._try_execute_code_unopt(code, namespace, code_type)
         result_unopt = {**result_unopt, "stdout": stdout_capture_unopt.getvalue(), "stderr": stderr_capture_unopt.getvalue()}
 
         return self._build_execution_result(code, result_opt, result_unopt)
 
-    def _try_execute_code_as_is(self, code, namespace):
+    def _try_execute_code_as_is(self, code, namespace, code_type):
         """Attempt code execution and capture any errors"""
         namespace['table_env'] = namespace['opt_table_env']
-        return self._try_exec_code(code, namespace)
+        return self._try_exec_code(code, namespace, code_type)
 
-    def _try_execute_code_unopt(self, code, namespace):
+    def _try_execute_code_unopt(self, code, namespace, code_type):
         """Attempt code execution and capture any errors"""
         namespace['table_env'] = namespace['unopt_table_env']
-        return self._try_exec_code(code, namespace)
+        return self._try_exec_code(code, namespace, code_type)
 
-    def _try_exec_code(self, code, namespace):
+    def _try_exec_code(self, code, namespace, code_type):
+
+        final_code = code
+        if code_type == "sql":
+            final_code = f"""print(table_env.sql_query(\"\"\"{code}\"\"\").explain())"""
         try:
-            exec(code, namespace, namespace)
+            exec(final_code, namespace, namespace)
             return {"success": True, "error_name": "", "error_message": ""}
         except Exception as e:
             error_name = self.extract_error_name(e)
@@ -771,13 +788,13 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
     def handle_execute_code(self, request_dict):
         """Handle individual client connections"""
         self._log_handler_start()
-        code = self._extract_code_from_request(request_dict)
+        code, code_type = self._extract_code_from_request(request_dict)
 
         try:
             program_number = self.get_next_program_number()
             self._log_program_received(program_number, code)
 
-            execution_result = self._execute_and_process(program_number, code)
+            execution_result = self._execute_and_process(program_number, code, code_type)
             self._log_execution_results(program_number, execution_result)
 
             return execution_result
@@ -786,13 +803,14 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
             self._log_handler_error(e)
             return {"fatal_error": str(e), "stack_trace": traceback.format_exc()}
 
+
     def _log_handler_start(self):
         """Log the start of code execution handler"""
         print(f"[{datetime.now()}] Running handle_execute_code()...")
 
     def _extract_code_from_request(self, request_dict):
         """Extract code data from request dictionary"""
-        return request_dict['code']
+        return request_dict['code'], (request_dict['code_type'] if 'code_type' in request_dict else 'api')
 
     def _log_program_received(self, program_number, code):
         """Log details of received program"""
@@ -803,10 +821,10 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         print(code)
         print(f"{'='*60}")
 
-    def _execute_and_process(self, program_number, code):
+    def _execute_and_process(self, program_number, code, code_type):
         """Execute code and process results"""
         print(f"[{datetime.now()}] Executing program #{program_number} with Flink template...")
-        execution_result = self.execute_flink_code(code)
+        execution_result = self.execute_flink_code(code, code_type)
         self._save_execution_logs(program_number, code, execution_result)
         return execution_result
 
@@ -1013,11 +1031,16 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         GLOBAL_STATE.counter_lock = threading.Lock()
         GLOBAL_STATE.log_dir = 'server-log'
 
+        catalog_name = None
         self.setup_logging_directory(GLOBAL_STATE.log_dir)
 
         GLOBAL_STATE.table_schemas = self.load_tpcds_schema("pyflink-oracle-server/tpcds-schema.json")
         # Initialize Flink environment once
-        GLOBAL_STATE.flink_namespace = self.setup_flink_environment()
+
+        if 'catalog_name' in request_dict:
+            catalog_name = request_dict['catalog_name']
+
+        GLOBAL_STATE.flink_namespace = self.setup_flink_environment(catalog_name)
 
         return {"success": True}
 

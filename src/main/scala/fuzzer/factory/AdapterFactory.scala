@@ -1,5 +1,6 @@
 package fuzzer.factory
 
+import fuzzer.adapters.dask.{DaskCodeExecutor, DaskCodeGenerator, DaskDataAdapter}
 import fuzzer.adapters.spark.{SparkCodeExecutor, SparkCodeGenerator, SparkDataAdapter}
 import fuzzer.adapters.flink.{FlinkCodeExecutor, FlinkCodeGenerator, FlinkDataAdapter}
 import fuzzer.code.SourceCode
@@ -25,6 +26,11 @@ object AdapterFactory {
         val codeExecutor = new FlinkCodeExecutor(config, spec)
         (dataAdapter, codeGenerator, codeExecutor)
 
+      case "dask-python" =>
+        val dataAdapter = new DaskDataAdapter(config)
+        val codeGenerator = new DaskCodeGenerator(config, spec, dag2CodeFunc)
+        val codeExecutor = new DaskCodeExecutor(config, spec)
+        (dataAdapter, codeGenerator, codeExecutor)
       case _ =>
         throw new IllegalArgumentException(s"Unsupported API: ${config.targetAPI}")
     }

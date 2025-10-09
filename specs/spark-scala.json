@@ -116,5 +116,16 @@
       }
     },
     "returns": "DataFrame"
+  },
+  "offset": {
+    "type": "unary",
+    "parameters": {
+      "num": {
+        "type": "int",
+        "required": true,
+        "description": "Number of initial rows to skip before returning results"
+      }
+    },
+    "returns": "DataFrame"
   }
 }

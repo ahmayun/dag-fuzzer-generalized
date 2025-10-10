@@ -13,6 +13,7 @@ object Harness {
       |import fuzzer.utils.spark.optimizer.ToolKit.withoutOptimized
       |import fuzzer.templates.ComplexObject
       |import fuzzer.core.exceptions._
+      |import org.apache.spark.sql.expressions.Window
       |""".stripMargin
 
   val preloadedUDFDefinition =

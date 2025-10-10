@@ -490,6 +490,189 @@ object UserImplSparkScala {
     s"""$colExpr.cast("$targetType")"""
   }
 
+  // NEW: Generate window function with partitionBy and orderBy
+  def generateWindowFunction(node: Node[DFOperator]): String = {
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val fullColName = constructFullColumnName(table, col)
+
+    // Pick partition columns (1-2 columns)
+    val numPartitionCols = 1 + Random.nextInt(2)
+    val partitionCols = (0 until numPartitionCols).map { _ =>
+      val (t, c) = pickRandomColumnFromReachableSources(node)
+      s"""col("${constructFullColumnName(t, c)}")"""
+    }.mkString(", ")
+
+    // Pick order column
+    val (orderTable, orderCol) = pickRandomColumnFromReachableSources(node)
+    val orderColExpr = s"""col("${constructFullColumnName(orderTable, orderCol)}")"""
+    val orderDir = if (Random.nextBoolean()) ".asc" else ".desc"
+
+    // Choose window function type
+    val windowFuncs = Seq("row_number", "rank", "dense_rank", "percent_rank", "ntile")
+    val chosenFunc = windowFuncs(Random.nextInt(windowFuncs.length))
+
+    val funcCall = if (chosenFunc == "ntile") {
+      val n = 2 + Random.nextInt(9) // 2-10 tiles
+      s"$chosenFunc($n)"
+    } else {
+      s"$chosenFunc()"
+    }
+
+    s"""$funcCall.over(Window.partitionBy($partitionCols).orderBy($orderColExpr$orderDir))"""
+  }
+
+  // NEW: Generate array/collection operations
+  def generateArrayExpression(node: Node[DFOperator]): String = {
+    val arrayOps = Seq("array_contains", "array_distinct", "array_join", "array_max", "array_min", "size", "sort_array", "reverse", "slice")
+    val chosenOp = arrayOps(Random.nextInt(arrayOps.length))
+
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val fullColName = constructFullColumnName(table, col)
+    val colExpr = s"""col("$fullColName")"""
+
+    chosenOp match {
+      case "array_contains" =>
+        val value = generateLitExpression()
+        s"array_contains($colExpr, $value)"
+      case "array_join" =>
+        val delimiter = Random.alphanumeric.take(1).mkString
+        s"""array_join($colExpr, "$delimiter")"""
+      case "slice" =>
+        val start = 1 + Random.nextInt(5)
+        val length = 1 + Random.nextInt(5)
+        s"slice($colExpr, $start, $length)"
+      case _ => s"$chosenOp($colExpr)"
+    }
+  }
+
+  // NEW: Generate string operations
+  def generateStringFunction(node: Node[DFOperator]): String = {
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val fullColName = constructFullColumnName(table, col)
+    val colExpr = s"""col("$fullColName")"""
+
+    val stringFuncs = Seq("upper", "lower", "trim", "ltrim", "rtrim", "substring", "concat", "split", "regexp_replace", "length")
+    val chosenFunc = stringFuncs(Random.nextInt(stringFuncs.length))
+
+    chosenFunc match {
+      case "substring" =>
+        val pos = 1 + Random.nextInt(5)
+        val len = 1 + Random.nextInt(10)
+        s"substring($colExpr, $pos, $len)"
+      case "concat" =>
+        val (table2, col2) = pickRandomColumnFromReachableSources(node)
+        val col2Expr = s"""col("${constructFullColumnName(table2, col2)}")"""
+        s"concat($colExpr, $col2Expr)"
+      case "split" =>
+        val delimiter = Seq(",", " ", "|", "-")(Random.nextInt(4))
+        s"""split($colExpr, "$delimiter")"""
+      case "regexp_replace" =>
+        val pattern = Seq("[0-9]", "[a-z]", "\\\\s+")(Random.nextInt(3))
+        val replacement = Random.alphanumeric.take(3).mkString
+        s"""regexp_replace($colExpr, "$pattern", "$replacement")"""
+      case _ => s"$chosenFunc($colExpr)"
+    }
+  }
+
+  // NEW: Generate date/timestamp operations
+  def generateDateFunction(node: Node[DFOperator]): String = {
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val fullColName = constructFullColumnName(table, col)
+    val colExpr = s"""col("$fullColName")"""
+
+    val dateFuncs = Seq("year", "month", "dayofmonth", "dayofweek", "hour", "minute", "second", "date_add", "date_sub", "datediff", "months_between", "to_date", "date_format")
+    val chosenFunc = dateFuncs(Random.nextInt(dateFuncs.length))
+
+    chosenFunc match {
+      case "date_add" | "date_sub" =>
+        val days = Random.nextInt(365)
+        s"$chosenFunc($colExpr, $days)"
+      case "datediff" =>
+        val (table2, col2) = pickRandomColumnFromReachableSources(node)
+        val col2Expr = s"""col("${constructFullColumnName(table2, col2)}")"""
+        s"datediff($colExpr, $col2Expr)"
+      case "months_between" =>
+        val (table2, col2) = pickRandomColumnFromReachableSources(node)
+        val col2Expr = s"""col("${constructFullColumnName(table2, col2)}")"""
+        s"months_between($colExpr, $col2Expr)"
+      case "date_format" =>
+        val formats = Seq("yyyy-MM-dd", "MM/dd/yyyy", "dd-MM-yyyy", "yyyy-MM-dd HH:mm:ss")
+        val format = formats(Random.nextInt(formats.length))
+        s"""date_format($colExpr, "$format")"""
+      case "to_date" =>
+        val formats = Seq("yyyy-MM-dd", "MM/dd/yyyy", "dd-MM-yyyy")
+        val format = formats(Random.nextInt(formats.length))
+        s"""to_date($colExpr, "$format")"""
+      case _ => s"$chosenFunc($colExpr)"
+    }
+  }
+
+  // NEW: Generate mathematical/numeric operations
+  def generateMathFunction(node: Node[DFOperator]): String = {
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val fullColName = constructFullColumnName(table, col)
+    val colExpr = s"""col("$fullColName")"""
+
+    val mathFuncs = Seq("abs", "ceil", "floor", "round", "sqrt", "pow", "exp", "log", "sin", "cos", "tan")
+    val chosenFunc = mathFuncs(Random.nextInt(mathFuncs.length))
+
+    chosenFunc match {
+      case "pow" =>
+        val exp = 2 + Random.nextInt(4) // power of 2-5
+        s"pow($colExpr, $exp)"
+      case "round" =>
+        val scale = Random.nextInt(5)
+        s"round($colExpr, $scale)"
+      case _ => s"$chosenFunc($colExpr)"
+    }
+  }
+
+  // NEW: Generate null handling operations
+  def generateNullHandlingExpression(node: Node[DFOperator]): String = {
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val fullColName = constructFullColumnName(table, col)
+    val colExpr = s"""col("$fullColName")"""
+
+    val nullOps = Seq("isNull", "isNotNull", "coalesce", "ifnull", "nullif", "nvl", "nvl2")
+    val chosenOp = nullOps(Random.nextInt(nullOps.length))
+
+    chosenOp match {
+      case "isNull" | "isNotNull" =>
+        s"$colExpr.$chosenOp()"
+      case "coalesce" =>
+        val defaultValue = generateLitExpression()
+        s"coalesce($colExpr, $defaultValue)"
+      case "ifnull" | "nvl" =>
+        val replacement = generateLitExpression()
+        s"$chosenOp($colExpr, $replacement)"
+      case "nvl2" =>
+        val valueIfNotNull = generateLitExpression()
+        val valueIfNull = generateLitExpression()
+        s"nvl2($colExpr, $valueIfNotNull, $valueIfNull)"
+      case "nullif" =>
+        val compareValue = generateLitExpression()
+        s"nullif($colExpr, $compareValue)"
+      case _ => s"$chosenOp($colExpr)"
+    }
+  }
+
+  // NEW: Generate aggregation with multiple columns
+  def generateComplexAggregation(node: Node[DFOperator]): String = {
+    val aggFuncs = Seq("sum", "avg", "count", "min", "max", "stddev", "variance", "collect_list", "collect_set", "approx_count_distinct")
+    val chosenFunc = aggFuncs(Random.nextInt(aggFuncs.length))
+
+    val (table, col) = pickRandomColumnFromReachableSources(node)
+    val fullColName = constructFullColumnName(table, col)
+
+    chosenFunc match {
+      case "approx_count_distinct" =>
+        val rsd = 0.01 + Random.nextFloat() * 0.04 // 0.01 to 0.05
+        s"""approx_count_distinct("$fullColName", $rsd)"""
+      case _ =>
+        s"""$chosenFunc("$fullColName")"""
+    }
+  }
+
   def generateSingleColumnExpression(
                                       node: Node[DFOperator],
                                       param: JsLookupResult,
@@ -514,17 +697,23 @@ object UserImplSparkScala {
     val boolExpr = s"!$colExpr"
     val udfExpr = generateUDFCall(node, List(chosenTuple))
 
-    // NEW: Add probability to generate lit(), when/otherwise, cast
+    // NEW: Add probability to generate lit(), when/otherwise, cast, or offset expressions
     val advancedExprProb = 0.35f // 15% chance to use advanced expressions
 
     if (Random.nextFloat() < advancedExprProb) {
-      val exprTypes = Seq("lit", "when", "cast")
+      val exprTypes = Seq("lit", "when", "cast", "window", "array", "string", "date", "math", "null")
       val chosenExpr = exprTypes(Random.nextInt(exprTypes.length))
 
       chosenExpr match {
         case "lit" => s"$colExpr === ${generateLitExpression()}"
         case "when" => generateWhenOtherwiseExpression(node)
         case "cast" => s"${generateCastExpression(node)} === ${generateLitExpression()}"
+        case "window" => generateWindowFunction(node)
+        case "array" => generateArrayExpression(node)
+        case "string" => generateStringFunction(node)
+        case "date" => generateDateFunction(node)
+        case "math" => generateMathFunction(node)
+        case "null" => generateNullHandlingExpression(node)
       }
     } else if (Random.nextFloat() < prob) {
       udfExpr

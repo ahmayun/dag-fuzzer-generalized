@@ -11,114 +11,18 @@ import scala.collection.mutable
 
 object UserImplSparkScala {
 
-
   def generateStringFilterUDF(): String = {
-    // String Filter UDFs
-    val stringFilters = List(
-      """
-        |val filterUdfString = udf((arg: String) => {
-        |  arg.length > 5
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfString = udf((arg: String) => {
-        |  arg.startsWith("A") || arg.startsWith("a")
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfString = udf((arg: String) => {
-        |  arg.toLowerCase.contains("test")
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfString = udf((arg: String) => {
-        |  arg.forall(_.isLetter) && arg.length < 10
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfString = udf((arg: String) => {
-        |  arg.count(_ == 'e') >= 2
-        |}).asNondeterministic()
-        |""".stripMargin
-    )
+    val stringFilters = List("val filterUdfString = udf((arg: String) => arg.length > 5).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.startsWith(\"A\") || arg.startsWith(\"a\")).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.toLowerCase.contains(\"test\")).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.forall(_.isLetter) && arg.length < 10).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.count(_ == 'e') >= 2).asNondeterministic()")
     Random.choice(stringFilters)
   }
 
   def generateIntFilterUDF(): String = {
-    // Integer Filter UDFs
-    val intFilters = List(
-      """
-        |val filterUdfInteger = udf((arg: Int) => {
-        |  arg > 0 && arg % 2 == 0
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfInteger = udf((arg: Int) => {
-        |  arg >= 10 && arg <= 100
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfInteger = udf((arg: Int) => {
-        |  arg % 3 == 0 || arg % 5 == 0
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfInteger = udf((arg: Int) => {
-        |  arg.toString == arg.toString.reverse
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfInteger = udf((arg: Int) => {
-        |  arg > 0 && (arg & (arg - 1)) == 0
-        |}).asNondeterministic()
-        |""".stripMargin
-    )
-
+    val intFilters = List("val filterUdfInteger = udf((arg: Int) => arg > 0 && arg % 2 == 0).asNondeterministic()", "val filterUdfInteger = udf((arg: Int) => arg >= 10 && arg <= 100).asNondeterministic()", "val filterUdfInteger = udf((arg: Int) => arg % 3 == 0 || arg % 5 == 0).asNondeterministic()","val filterUdfInteger = udf((arg: Int) => arg.toString == arg.toString.reverse).asNondeterministic()", "val filterUdfInteger = udf((arg: Int) => arg > 0 && (arg & (arg - 1)) == 0).asNondeterministic()")
     Random.choice(intFilters)
   }
 
   def generateDecimalFilterUDF(): String = {
-    // Decimal Filter UDFs
-    val decimalFilters = List(
-      """
-        |val filterUdfDecimal = udf((arg: Double) => {
-        |  arg > 0.0 && arg < 1000.0
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfDecimal = udf((arg: Double) => {
-        |  (scala.math.round(arg * 100).toDouble / 100.0) == arg
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfDecimal = udf((arg: Double) => {
-        |  arg >= 50.5 && arg.toInt % 10 == 5
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfDecimal = udf((arg: Double) => {
-        |  (arg * 100) % 25 == 0
-        |}).asNondeterministic()
-        |""".stripMargin,
-
-      """
-        |val filterUdfDecimal = udf((arg: Double) => {
-        |  scala.math.abs(arg - scala.math.round(arg).toDouble) > 0.1
-        |}).asNondeterministic()
-        |""".stripMargin
-    )
-
+    val decimalFilters = List("val filterUdfDecimal = udf((arg: Double) => arg > 0.0 && arg < 1000.0).asNondeterministic()","val filterUdfDecimal = udf((arg: Double) => (scala.math.round(arg * 100).toDouble / 100.0) == arg).asNondeterministic()","val filterUdfDecimal = udf((arg: Double) => arg >= 50.5 && arg.toInt % 10 == 5).asNondeterministic()","val filterUdfDecimal = udf((arg: Double) => (arg * 100) % 25 == 0).asNondeterministic()","val filterUdfDecimal = udf((arg: Double) => scala.math.abs(arg - scala.math.round(arg).toDouble) > 0.1).asNondeterministic()")
     Random.choice(decimalFilters)
   }
 
@@ -197,12 +101,6 @@ object UserImplSparkScala {
     }
   }
 
-  def pickRandomReachableSource(node: Node[DFOperator]): Node[DFOperator] = {
-    val sources = node.getReachableSources.toSeq
-    assert(sources.nonEmpty, "Expected DAG sources to be non-empty")
-    sources(Random.nextInt(sources.length))
-  }
-
   def getAllColumns(node: Node[DFOperator], preferUnique: Boolean = true): Seq[(TableMetadata, ColumnMetadata)] = {
     val tablesColPairs = node.value.stateView.values.toSeq.flatMap { t =>
       t.columns.map(c => (t, c))
@@ -244,21 +142,13 @@ object UserImplSparkScala {
       _metadata = Map("source" -> "runtime", "gen-iteration" -> fuzzer.core.global.State.iteration.toString)
     ))
   }
-  def updateSourceState(
-                         node: Node[DFOperator],
-                         param: JsLookupResult,
-                         paramName: String,
-                         paramType: String,
-                         paramVal: String
-                       ): Unit = {
+  def updateSourceState(node: Node[DFOperator], param: JsLookupResult, paramName: String, paramType: String, paramVal: String): Unit = {
     val effect = (param \ "state-effect").asOpt[String].get
     effect match {
       case "table-rename" => renameTables(paramVal, node)
       case "column-add" => addColumn(paramVal, node)
     }
   }
-
-
 
   def propagateState(startNode: Node[DFOperator]): Unit = {
     val visited = mutable.Set[String]()
@@ -287,12 +177,7 @@ object UserImplSparkScala {
     }
   }
 
-  def generateOrPickString(
-                            node: Node[DFOperator],
-                            param: JsLookupResult,
-                            paramName: String,
-                            paramType: String
-                          ): String = {
+  def generateOrPickString(node: Node[DFOperator],param: JsLookupResult,paramName: String,paramType: String): String = {
 
     val isStateAltering: Boolean = (param \ "state-altering").asOpt[Boolean].getOrElse(false)
 
@@ -315,21 +200,10 @@ object UserImplSparkScala {
   def pickTwoColumns(stateView: Map[String, TableMetadata]): Option[((TableMetadata, ColumnMetadata), (TableMetadata, ColumnMetadata))] = {
 
     // Step 1: Flatten all columns and group by DataType -> Map[DataType, List[(TableMetadata, ColumnMetadata)]]
-    val columnsByType: Map[DataType, Seq[(TableMetadata, ColumnMetadata)]] = stateView
-      .values
-      .toSeq
-      .flatMap { table =>
-        table.columns.map(c => (c.dataType, (table, c)))
-      }
-      .groupBy(_._1)
-      .view
-      .mapValues(_.map(_._2))
-      .toMap
-
+    val columnsByType: Map[DataType, Seq[(TableMetadata, ColumnMetadata)]] = stateView.values.toSeq.flatMap { table => table.columns.map(c => (c.dataType, (table, c)))}.groupBy(_._1).view.mapValues(_.map(_._2)).toMap
 
     // Step 2: Filter to only those datatypes which have columns from at least 2 distinct tables
-    val viableTypes: Seq[(DataType, Seq[(TableMetadata, ColumnMetadata)])] = columnsByType.toSeq
-      .map { case (dt, cols) =>
+    val viableTypes: Seq[(DataType, Seq[(TableMetadata, ColumnMetadata)])] = columnsByType.toSeq.map { case (dt, cols) =>
         val tableGroups = cols.groupBy(_._1)  // group by TableMetadata
         (dt, tableGroups)
       }
@@ -653,23 +527,6 @@ object UserImplSparkScala {
         val compareValue = generateLitExpression()
         s"nullif($colExpr, $compareValue)"
       case _ => s"$chosenOp($colExpr)"
-    }
-  }
-
-  // NEW: Generate aggregation with multiple columns
-  def generateComplexAggregation(node: Node[DFOperator]): String = {
-    val aggFuncs = Seq("sum", "avg", "count", "min", "max", "stddev", "variance", "collect_list", "collect_set", "approx_count_distinct")
-    val chosenFunc = aggFuncs(Random.nextInt(aggFuncs.length))
-
-    val (table, col) = pickRandomColumnFromReachableSources(node)
-    val fullColName = constructFullColumnName(table, col)
-
-    chosenFunc match {
-      case "approx_count_distinct" =>
-        val rsd = 0.01 + Random.nextFloat() * 0.04 // 0.01 to 0.05
-        s"""approx_count_distinct("$fullColName", $rsd)"""
-      case _ =>
-        s"""$chosenFunc("$fullColName")"""
     }
   }
 

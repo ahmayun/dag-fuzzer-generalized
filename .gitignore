@@ -27,3 +27,5 @@ plot-jacoco-coverage.py
 coverage-plotting-runs/
 cluster-results/
 dask-server-log/
+.graphs/
+replay/

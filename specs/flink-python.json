@@ -51,6 +51,17 @@
     },
     "returns": "Table"
   },
+  "join_lateral": {
+    "type": "unary",
+    "parameters": {
+      "table_function": {
+        "type": "Expression",
+        "required": true,
+        "description": "Table function call expression"
+      }
+    },
+    "returns": "Table"
+  },
   "add_columns": {
     "type": "unary",
     "parameters": {

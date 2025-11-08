@@ -35,6 +35,8 @@ object MainFuzzer {
         case flag :: value :: tail if flag.startsWith("--") =>
           val updated = flag match {
             case "--master" => config.copy(master = value)
+            case "--replay" => config.copy(replay = value.toBoolean)
+            case "--artifacts-dir" => config.copy(artifactsDir = value)
             case "--target-api" => config.copy(targetAPI = value)
             case "--spec-path" => config.copy(specPath = value)
             case "--exit-after-n-successes" => config.copy(exitAfterNSuccesses = value.toBoolean)
@@ -115,7 +117,7 @@ object MainFuzzer {
 
     val startTime = System.currentTimeMillis()
 
-    val results = engine.run()
+    val results = if(config.replay) engine.replay()  else engine.run()
 
     val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
 

@@ -24,7 +24,9 @@ case class FuzzerConfig(
                          randIntMax: Int,
                          randFloatMin: Double,
                          randFloatMax: Double,
-                         logicalOperatorSet: Set[String]
+                         logicalOperatorSet: Set[String],
+                         replay: Boolean,
+                         artifactsDir: String
                        )
 
 object FuzzerConfig {
@@ -61,7 +63,9 @@ object FuzzerConfig {
       randIntMax = 50,
       randFloatMin = -50.0,
       randFloatMax = 50.0,
-      logicalOperatorSet = Set(">", "<", ">=", "<=")
+      logicalOperatorSet = Set(">", "<", ">=", "<="),
+      replay = false,
+      artifactsDir = null
     )
   }
 
@@ -90,7 +94,9 @@ object FuzzerConfig {
       randIntMax = 50,
       randFloatMin = -50.0,
       randFloatMax = 50.0,
-      logicalOperatorSet = Set(">", "<", ">=", "<=")
+      logicalOperatorSet = Set(">", "<", ">=", "<="),
+      replay = false,
+      artifactsDir = null
     )
   }
 
@@ -119,7 +125,9 @@ object FuzzerConfig {
       randIntMax = 50,
       randFloatMin = -50.0,
       randFloatMax = 50.0,
-      logicalOperatorSet = Set(">", "<", ">=", "<=")
+      logicalOperatorSet = Set(">", "<", ">=", "<="),
+      replay = false,
+      artifactsDir = null
     )
   }
 

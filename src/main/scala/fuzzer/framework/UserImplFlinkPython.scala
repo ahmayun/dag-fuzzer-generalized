@@ -275,12 +275,12 @@ object UserImplFlinkPython {
     pickTwoColumns(node.value.stateView)
   }
 
-  def generateMultiColumnExpression(
-                                     node: Node[DFOperator],
-                                     param: JsLookupResult,
-                                     paramName: String,
-                                     paramType: String
-                                   ): Option[String] = {
+  def generateCrossTableExpression(
+                                    node: Node[DFOperator],
+                                    param: JsLookupResult,
+                                    paramName: String,
+                                    paramType: String
+                                  ): Option[String] = {
     pickMultiColumnsFromReachableSources(node) match {
       case Some(pair) =>
         val ((table1, col1), (table2, col2)) = pair
@@ -292,6 +292,27 @@ object UserImplFlinkPython {
         val crossTableExpr = s"$colExpr1 == $colExpr2"
         Some(crossTableExpr)
       case None => None
+    }
+  }
+
+  def generateTableUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
+    val fullColExpressions = args.map{case (table, col) => s"col('${constructFullColumnName(table, col)}')"}
+    val (table, col) = args.head
+    val fullColName = constructFullColumnName(table, col)
+    val newColName = s"lateral_$fullColName"
+    addColumn(newColName, node)
+    s"preloaded_udtf(${fullColExpressions.mkString(",")}).alias('$newColName')"
+  }
+
+  def generateMultiColumnExpression(
+                                     node: Node[DFOperator],
+                                     param: JsLookupResult,
+                                     paramName: String,
+                                     paramType: String
+                                   ): Option[String] = {
+    node.value.name match {
+      case _ =>
+        generateCrossTableExpression(node, param, paramName, paramType)
     }
   }
 
@@ -331,6 +352,8 @@ object UserImplFlinkPython {
 
     if(node.value.name.contains("filter"))
       generateFilterUDFCall(node, args)
+    else if (node.value.name.contains("lateral"))
+      generateTableUDFCall(node, args)
     else
       generateComplexUDFCall(node, args)
   }
@@ -659,9 +682,19 @@ object UserImplFlinkPython {
       |""".stripMargin
   }
 
+  def generateTableFunction(): String = {
+    """
+      |@udtf(result_types=[DataTypes.STRING()])
+      |def preloaded_udtf(str_arg):
+      |    if str_arg:
+      |        for v in str_arg.split(','):
+      |            yield v.strip(),
+      |""".stripMargin
+  }
+
   def generatePreloadedUDF(): String = {
     s"""
-      |from pyflink.table.udf import AggregateFunction, udaf
+      |from pyflink.table.udf import AggregateFunction, udaf, udtf
       |from pyflink.table import DataTypes
       |import pandas as pd
       |
@@ -675,6 +708,8 @@ object UserImplFlinkPython {
       |
       |@udf(result_type=DataTypes.BOOLEAN())
       |${generateDecimalFilterUDF()}
+      |
+      |${generateTableFunction()}
       |
       |${generateAggregationFunction()}
       |

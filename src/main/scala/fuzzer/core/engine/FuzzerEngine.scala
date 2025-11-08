@@ -193,6 +193,66 @@ class FuzzerEngine(
     }
   }
 
+  def scalaFilesLazy(replayPath: String): LazyList[File] = {
+    val replayDir = new File(replayPath)
+
+    def filesInDir(dir: File, inSuccessDir: Boolean): LazyList[File] = {
+      if (!dir.exists() || !dir.isDirectory) {
+        LazyList.empty
+      } else {
+        // Check if THIS directory is named "Success"
+        val isSuccess = dir.getName == "Success"
+        val shouldCollect = inSuccessDir || isSuccess
+
+        val (dirs, files) = dir.listFiles().partition(_.isDirectory)
+
+        // Only collect scala files if we're inside a "Success" directory
+        val scalaFiles = if (shouldCollect) {
+          LazyList.from(files.filter(_.getName.endsWith(".scala")))
+        } else {
+          LazyList.empty
+        }
+
+        // Recursively process subdirectories
+        val subDirFiles = LazyList.from(dirs).flatMap(d =>
+          filesInDir(d, shouldCollect)
+        )
+
+        scalaFiles #::: subDirFiles
+      }
+    }
+
+    filesInDir(replayDir, inSuccessDir = false)
+  }
+
+
+
+
+  def replay(): FuzzerResults = {
+    val stats = new CampaignStats()
+
+    val terminateF = codeExecutor.setupEnvironment()
+    dataAdapter.loadData(codeExecutor)
+
+    // here the spec path is actually the path to artifacts dir
+    val lazyFileIter = scalaFilesLazy(config.artifactsDir)
+
+    try {
+      lazyFileIter.foreach { f =>
+        println(f)
+      }
+
+      // Return final results
+      codeExecutor.tearDownEnvironment(terminateF)
+      FuzzerResults(stats)
+    } catch {
+      case ex: DAGFuzzerException =>
+        println(s"ERROR MSG: ${ex.inner.getMessage}")
+        codeExecutor.tearDownEnvironment(terminateF)
+        throw ex.inner
+    }
+  }
+
 
   def isInvalidDFG(dag: Graph[DFOperator]): (Boolean, String) = {
     dag match {

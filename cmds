@@ -15,3 +15,5 @@ python plot-coverage.py --libs lib-flink-filtered-java-11-only
 python plot-coverage.py --dump-dir coverage-dumps/dump-20250925_214644 --libs lib-spark-only/ --coverage-for "org\.apache\.spark\.sql\.catalyst\..*"
 java -jar jacoco-0.8.13/lib/jacococli.jar report coverage-dumps/dump-20250925_214644/coverage-dump_20250925_215747.exec --classfiles lib-spark-only/ --html coverage-report-html-spark/
 java -jar jacoco-0.8.13/lib/jacococli.jar report coverage-dumps/coverage-dump_20250925_133953.exec --classfiles lib-flink-filtered-java-11-only/ --html coverage-report-html-flink/
+java -cp "target/scala-2.13/CardinalityEstimatorTest-assembly-0.1.0-SNAPSHOT.jar:lib/*" sqlsmith.FlinkFuzzTests local[*] --output-location target/fuzz-tests-output/flink-python/ --duration 86400 --no-hive --tpcds-path tpcds-data/
+JAVA_TOOL_OPTIONS="-javaagent:/home/student/jacoco-0.8.13/lib/jacocoagent.jar=destfile=/home/student/coverage-runtime.exec,append=false,dumponexit=true,output=tcpserver,port=6300" ./pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py

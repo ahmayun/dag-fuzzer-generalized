@@ -32,3 +32,4 @@ replay/
 .scala-build/
 tpcds-csv-*pc/
 tpcds-data-*pc/
+tpcds5pc.zip

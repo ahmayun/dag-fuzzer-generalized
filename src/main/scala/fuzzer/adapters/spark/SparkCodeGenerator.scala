@@ -9,13 +9,15 @@ import fuzzer.data.tables.TableMetadata
 import fuzzer.templates.Harness
 import fuzzer.utils.spark.tpcds.TPCDSTablesLoader
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.catalyst.rules.Rule.coverage
+import org.apache.spark.sql.functions.{lit, row_number}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import play.api.libs.json.JsValue
 
 import scala.tools.reflect.ToolBox
 import java.lang.reflect.InvocationTargetException
-import scala.reflect.runtime.currentMirror
+import scala.reflect.runtime.{currentMirror, universe}
 import scala.util.matching.Regex
 
 class SparkCodeGenerator(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Graph[DFOperator] => SourceCode) extends CodeGenerator {
@@ -29,8 +31,8 @@ class SparkDataAdapter(config: FuzzerConfig) extends DataAdapter {
 
   override def getTableByName(name: String): Option[TableMetadata] = ???
 
-  override def loadData(executor: CodeExecutor): Unit = {
-    TPCDSTablesLoader.loadAll(executor.asInstanceOf[SparkCodeExecutor].session.get, config.localTpcdsPath, dbName = "tpcds")
+  override def loadData(executor: CodeExecutor, filterF: String => Boolean = _ => true): Unit = {
+    TPCDSTablesLoader.loadAll(executor.asInstanceOf[SparkCodeExecutor].session.get, config.localTpcdsPath, dbName = "tpcds", filterF)
     println("Loaded tpcds datasets successfully!")
   }
 
@@ -48,7 +50,7 @@ class SparkDataAdapter(config: FuzzerConfig) extends DataAdapter {
 }
 
 class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor {
-  private def createFullSourcesFromHarness(source: String): (String, String) = {
+  private def createFullSourcesFromHarness(source: SourceCode): (String, String) = {
     val fullSourceOpt = Harness.embedCode(
       Harness.sparkProgramOptimizationsOn,
       source,
@@ -78,8 +80,12 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
         new RuntimeException("Dynamic program invocation failed in OracleSystem.runWithSuppressOutput()", e)
     }
 
-
     (throwable, "", "")
+  }
+
+  override def executeRaw(source: String): Any = {
+    val toolbox = currentMirror.mkToolBox()
+    toolbox.eval(toolbox.parse(source))
   }
 
   private def oracleUDFDuplication(optDF: DataFrame, unOptDF: DataFrame): Throwable = {
@@ -108,12 +114,65 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
       new Success(s"Success: Opt: $optCount - $unOptCount : UnOpt.")
   }
 
-  def compareRuns(optDF: DataFrame, unOptDF: DataFrame): Throwable = {
+  def oracleDFComparison(optDF: DataFrame, unOptDF: DataFrame): Throwable = {
+    // Add a deterministic row id so order is considered in equality.
+    // We use row_number over a constant sort key to create a sequence per DF.
+    val w = Window.orderBy(lit(1))
+    val lhs = optDF.withColumn("__row_id__", row_number().over(w))
+    val rhs = unOptDF.withColumn("__row_id__", row_number().over(w))
 
-    oracleUDFDuplication(optDF, unOptDF)
+    // Compare schemas first (including nullability & types)
+    if (lhs.schema != rhs.schema) {
+      return new MismatchException(
+        s"""Schemas don't match
+           |optDF schema: ${lhs.schema.treeString}
+           |unOptDF schema: ${rhs.schema.treeString}
+           |""".stripMargin)
+    }
+
+    // Set-minus both ways with counts (use exceptAll to respect duplicates)
+    val diffL = lhs.exceptAll(rhs)
+    val diffR = rhs.exceptAll(lhs)
+
+    val leftCount  = diffL.limit(1).count()  // cheap emptiness check
+    val rightCount = diffR.limit(1).count()
+
+    if (leftCount == 0 && rightCount == 0) {
+      new Success("DFs match")
+    } else {
+      // Collect a small, readable sample of diffs from both sides
+      val sampleLeft  = diffL.drop("__row_id__").limit(20).toJSON.collect().mkString("\n")
+      val sampleRight = diffR.drop("__row_id__").limit(20).toJSON.collect().mkString("\n")
+
+      new MismatchException(
+        s"""
+           |Outputs don't match (order-sensitive)
+           |
+           |Rows in optDF but not in unOptDF (up to 20):
+           |$sampleLeft
+           |
+           |Rows in unOptDF but not in optDF (up to 20):
+           |$sampleRight
+           |""".stripMargin)
+    }
   }
 
-  def checkOneGo(source: String): (Throwable, (Throwable, String), (Throwable, String)) = {
+  def compareRuns(optDF: DataFrame, unOptDF: DataFrame): Throwable = {
+    val udfCompare = oracleUDFDuplication(optDF, unOptDF)   // assumed: Try[String]
+    val dfCompare  = oracleDFComparison(optDF, unOptDF)     // Try[String]
+
+    dfCompare match {
+      case _: Success =>
+        udfCompare match {
+          case ex: MismatchException => ex
+          case _: Success => new Success("Both Plans and Final DFs match")
+        }
+      case ex: MismatchException => ex
+
+    }
+  }
+
+  def checkOneGo(source: SourceCode): (Throwable, (Throwable, String), (Throwable, String)) = {
     val (fullSourceOpt, fullSourceUnOpt) = createFullSourcesFromHarness(source)
 
     val combined = fullSourceOpt + fullSourceUnOpt
@@ -176,7 +235,7 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   var session: Option[SparkSession] = None
   override def execute(code: SourceCode): ExecutionResult = {
-    val (result, (optResult, fullSourceOpt), (unOptResult, fullSourceUnOpt)) = checkOneGo(code.toString)
+    val (result, (optResult, fullSourceOpt), (unOptResult, fullSourceUnOpt)) = checkOneGo(code)
     val combinedSourceWithResults = constructCombinedFileContents(result, optResult, unOptResult, fullSourceOpt, fullSourceUnOpt)
 
     val success = if(result.isInstanceOf[Success]) true else false
@@ -194,6 +253,7 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
       .master(config.master)
       .config("spark.driver.bindAddress", "127.0.0.1")
       .config("spark.ui.enabled", "false")
+      .config("spark.task.maxFailures", "1")
       .getOrCreate()
     sparkSession.sparkContext.setLogLevel("ERROR")
 

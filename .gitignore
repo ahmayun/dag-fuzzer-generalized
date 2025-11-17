@@ -29,3 +29,6 @@ cluster-results/
 dask-server-log/
 .graphs/
 replay/
+.scala-build/
+tpcds-csv-*pc/
+tpcds-data-*pc/

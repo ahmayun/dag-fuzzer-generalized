@@ -51,7 +51,7 @@ object FuzzerConfig {
       outExt = ".scala",
       timeLimitSec = 10,
       dagGenDir = "dag-gen/DAGs/DAGs",
-      localTpcdsPath = "tpcds-data",
+      localTpcdsPath = "tpcds-data-5pc",
       seed = "ahmad35".hashCode,
       maxStringLength = 5,
       updateLiveStatsAfter = 10,

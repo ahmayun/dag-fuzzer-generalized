@@ -461,13 +461,13 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 
         stdout_capture_opt, stderr_capture_opt = self._create_output_captures()
         with redirect_stdout(stdout_capture_opt), redirect_stderr(stderr_capture_opt):
-            result_opt = self._try_execute_code_as_is(code, namespace, code_type)
-        result_opt = {**result_opt, "stdout": stdout_capture_opt.getvalue(), "stderr": stderr_capture_opt.getvalue()}
+            result_opt, ns_opt = self._try_execute_code_as_is(code, namespace, code_type)
+        result_opt = {**result_opt, "stdout": stdout_capture_opt.getvalue(), "stderr": stderr_capture_opt.getvalue(), 'vars':{**ns_opt}}
 
         stdout_capture_unopt, stderr_capture_unopt = self._create_output_captures()
         with redirect_stdout(stdout_capture_unopt), redirect_stderr(stderr_capture_unopt):
-            result_unopt = self._try_execute_code_unopt(code, namespace, code_type)
-        result_unopt = {**result_unopt, "stdout": stdout_capture_unopt.getvalue(), "stderr": stderr_capture_unopt.getvalue()}
+            result_unopt, ns_unopt = self._try_execute_code_unopt(code, namespace, code_type)
+        result_unopt = {**result_unopt, "stdout": stdout_capture_unopt.getvalue(), "stderr": stderr_capture_unopt.getvalue(), 'vars':{**ns_opt}}
 
         return self._build_execution_result(code, result_opt, result_unopt)
 
@@ -482,18 +482,18 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         return self._try_exec_code(code, namespace, code_type)
 
     def _try_exec_code(self, code, namespace, code_type):
-
+        ns_local = {}
         final_code = code
         if code_type == "sql":
             final_code = f"""print(table_env.sql_query(\"\"\"{code}\"\"\").explain())"""
         try:
             exec(final_code, namespace, namespace)
-            return {"success": True, "error_name": "", "error_message": ""}
+            return {"success": True, "error_name": "", "error_message": ""}, namespace
         except Exception as e:
             error_name = self.extract_error_name(e)
 #             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             error_msg = str(e)
-            return {"success": False, "error_name": error_name, "error_message": error_msg}
+            return {"success": False, "error_name": error_name, "error_message": error_msg}, namespace
 
     def diff_outputs(self, result_opt, result_unopt):
         """
@@ -673,6 +673,97 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         return udf_count
 
     def _diff_success_results(self, result_opt, result_unopt):
+        df_diff = self._diff_dfs(result_opt, result_unopt)
+        if df_diff['is_same'] == False:
+            print("Returning df_diff")
+            print(df_diff)
+            print('-----')
+            return df_diff
+
+        if df_diff['is_same'] == None:
+            print("ERROR FAILED DF DIFF")
+
+        return self._diff_udf_counts(result_opt, result_unopt)
+
+    def _diff_dfs(self, result_opt, result_unopt):
+        opt_df = result_opt['vars']['sink']
+        unopt_df = result_unopt['vars']['sink']
+
+        try:
+            # Convert DataFrames to Pandas for comparison
+            opt_pandas = opt_df.to_pandas()
+            unopt_pandas = unopt_df.to_pandas()
+
+            # Add row_id to preserve order
+            opt_pandas['row_id'] = range(len(opt_pandas))
+            unopt_pandas['row_id'] = range(len(unopt_pandas))
+
+            # Check if column names match
+            if set(opt_pandas.columns) != set(unopt_pandas.columns):
+                return {
+                    "is_same": False,
+                    "result_name": "MismatchException",
+                    "result_details": {
+                        "error": "Column mismatch",
+                        "opt_columns": list(opt_pandas.columns),
+                        "unopt_columns": list(unopt_pandas.columns),
+                        "missing_in_opt": list(set(unopt_pandas.columns) - set(opt_pandas.columns)),
+                        "missing_in_unopt": list(set(opt_pandas.columns) - set(unopt_pandas.columns))
+                    }
+                }
+
+            # Reorder columns to match
+            unopt_pandas = unopt_pandas[opt_pandas.columns]
+
+            # Perform set difference in both directions
+            opt_merged = opt_pandas.merge(unopt_pandas, indicator=True, how='outer')
+
+            # Rows only in opt_df
+            only_in_opt = opt_merged[opt_merged['_merge'] == 'left_only'].drop('_merge', axis=1)
+            # Rows only in unopt_df
+            only_in_unopt = opt_merged[opt_merged['_merge'] == 'right_only'].drop('_merge', axis=1)
+
+            # Check if both differences are empty
+            if only_in_opt.empty and only_in_unopt.empty:
+                return {
+                    "is_same": True,
+                    "result_name": "Success",
+                    "result_details": {
+                        "message": "DFs match",
+                        "row_count": len(opt_pandas),
+                        "column_count": len(opt_pandas.columns) - 1  # Exclude row_id
+                    }
+                }
+            else:
+                # Limit rows for readability
+                max_rows_to_show = 100
+
+                return {
+                    "is_same": False,
+                    "result_name": "MismatchException",
+                    "result_details": {
+                        "error": "Outputs don't match",
+                        "rows_only_in_opt": only_in_opt.head(max_rows_to_show).to_dict('records'),
+                        "rows_only_in_unopt": only_in_unopt.head(max_rows_to_show).to_dict('records'),
+                        "count_only_in_opt": len(only_in_opt),
+                        "count_only_in_unopt": len(only_in_unopt),
+                        "total_mismatches": len(only_in_opt) + len(only_in_unopt)
+                    }
+                }
+
+        except Exception as e:
+            return {
+                "is_same": None,
+                "result_name": "MismatchException",
+                "result_details": {
+                    "error": "Exception during comparison",
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e)
+                }
+            }
+
+
+    def _diff_udf_counts(self, result_opt, result_unopt):
         """Compare stdout and stderr for two successful results."""
         # Extract output streams
         opt_stdout, opt_stderr = result_opt["stdout"], result_opt["stderr"]
@@ -686,19 +777,6 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         unopt_plan = self._extract_ast(unopt_stdout)
         print(unopt_plan)
 
-#         # Extract AST lines for comparison
-#         opt_lines = self._extract_ast_lines(opt_plan)
-#         unopt_lines = self._extract_ast_lines(unopt_plan)
-#
-#         # Compare plans
-#         same_plans = self._are_plans_identical(opt_lines, unopt_lines)
-#
-#         # Generate and print diff if needed
-#         diff_lines = None
-#         if not same_plans:
-#             diff_lines = self._generate_diff_output(opt_lines, unopt_lines)
-#
-#         self._print_diff_results(same_plans, diff_lines)
         n_opt_udfs, n_unopt_udfs = list(map(lambda p: self.count_udfs_in_plan(p), [opt_plan, unopt_plan]))
 
         # Return structured result
@@ -723,6 +801,8 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
 #         print(f"[{datetime.now()}] result_unopt = {result_unopt}.")
 
         diff_result = self.diff_outputs(result_opt, result_unopt)
+        del result_opt['vars']
+        del result_unopt['vars']
 
         final_program = "# ======== Program ========\n" + \
                         f"{code}\n\n" + \
@@ -1026,7 +1106,7 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         GLOBAL_STATE.host = 'localhost'
         GLOBAL_STATE.port = 8888
         GLOBAL_STATE.running = True
-        GLOBAL_STATE.tpcds_data_path = 'tpcds-csv'
+        GLOBAL_STATE.tpcds_data_path = 'tpcds-csv-5pc'
         GLOBAL_STATE.program_counter = 0
         GLOBAL_STATE.counter_lock = threading.Lock()
         GLOBAL_STATE.log_dir = 'server-log'

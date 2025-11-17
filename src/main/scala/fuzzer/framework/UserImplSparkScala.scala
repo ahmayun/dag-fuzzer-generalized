@@ -26,6 +26,18 @@ object UserImplSparkScala {
     Random.choice(decimalFilters)
   }
 
+  def generateComplexUDF(): String = {
+    val preloadedUDFDefinition =
+      """
+        |val preloadedUDF = udf((s: Any) => {
+        |  val r = scala.util.Random.nextInt()
+        |  ComplexObject(r,r)
+        |}).asNondeterministic()
+        |""".stripMargin
+
+    preloadedUDFDefinition
+  }
+
   def constructDFOCall(spec: JsValue, node: Node[DFOperator], in1: String, in2: String): String = {
     val opName = node.value.name
     val opSpec = spec \ opName
@@ -639,6 +651,8 @@ object UserImplSparkScala {
 
   def generatePreamble(): String = {
     s"""
+       |${generateComplexUDF()}
+       |
        |${generateStringFilterUDF()}
        |
        |${generateIntFilterUDF()}
@@ -652,8 +666,6 @@ object UserImplSparkScala {
     val variablePrefix = "auto"
     val finalVariableName = "sink"
 
-    l += generatePreamble()
-
     graph.traverseTopological { node =>
       node.value.varName = s"$variablePrefix${node.id}"
 
@@ -665,9 +677,14 @@ object UserImplSparkScala {
       val lhs = if(node.isSink) s"val $finalVariableName = " else s"val ${node.value.varName} = "
       l += s"$lhs$call"
     }
-    l += s"$finalVariableName.explain(true)"
+//    l += s"$finalVariableName.explain(true)"
+    l += s"$finalVariableName.collect()"
+    l += "spark.catalog.clearCache()"
+    l += "spark.sharedState.cacheManager.clearCache()"
+//    l += s"System.gc()"
+//    l += s"Thread.sleep(5000)"
 
-    SourceCode(src=l.mkString("\n"), ast=null)
+    SourceCode(src=l.mkString("\n"), ast=null, preamble=generatePreamble())
   }
 
 }

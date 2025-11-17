@@ -117,7 +117,7 @@ object MainFuzzer {
 
     val startTime = System.currentTimeMillis()
 
-    val results = if(config.replay) engine.replay()  else engine.run()
+    val results = if(config.replay) engine.replay() else engine.run()
 
     val elapsedSeconds = (System.currentTimeMillis() - startTime) / 1000
 

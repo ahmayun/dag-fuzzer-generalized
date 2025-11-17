@@ -6,7 +6,7 @@ import fuzzer.data.tables.TableMetadata
 trait DataAdapter {
   def getTables: Seq[TableMetadata]
   def getTableByName(name: String): Option[TableMetadata]
-  def loadData(executor: CodeExecutor): Unit
+  def loadData(executor: CodeExecutor, filterF: String => Boolean = _ => true): Unit
 
   // This function is called right before a program is generated
   // The user may use this if they want to, say, alias table columns before the program is generated

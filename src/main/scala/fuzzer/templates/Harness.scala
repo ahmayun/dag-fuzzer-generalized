@@ -1,8 +1,11 @@
 package fuzzer.templates
 
+import fuzzer.code.SourceCode
+
 object Harness {
 
   val insertionMark = "[[INSERT]]"
+  val preambleMark = "[[PREAMBLE]]"
   val resultMark = "[[RESULT]]"
 
   val imports =
@@ -16,23 +19,15 @@ object Harness {
       |import org.apache.spark.sql.expressions.Window
       |""".stripMargin
 
-  val preloadedUDFDefinition =
-    """
-      |    val preloadedUDF = udf((s: Any) => {
-      |      val r = scala.util.Random.nextInt()
-      |      ComplexObject(r,r)
-      |    }).asNondeterministic()
-      |""".stripMargin
-
   val sparkProgramOptimizationsOn: String =
     s"""
       |$imports
+      |$preambleMark
       |
       |object Optimized {
       |
       |  def main(args: Array[String]): Unit = {
       |    val spark = sparkOption.get
-      |$preloadedUDFDefinition
       |
       |$insertionMark
       |
@@ -63,7 +58,6 @@ object Harness {
       |  def main(args: Array[String]): Unit = {
       |    val spark = sparkOption.get
       |
-      |$preloadedUDFDefinition
       |
       |    val sparkOpt = spark.sessionState.optimizer
       |    val excludableRules = {
@@ -71,8 +65,21 @@ object Harness {
       |      val rules = defaultRules -- sparkOpt.nonExcludableRules.toSet
       |      rules
       |    }
-      |    val excludedRules = excludableRules.mkString(",")
-      |    withoutOptimized(excludedRules) {
+      |
+      |    val criticalRules = Set(
+      |       "org.apache.spark.sql.catalyst.optimizer.PruneFilters",
+      |       "org.apache.spark.sql.catalyst.optimizer.ColumnPruning",
+      |       "org.apache.spark.sql.catalyst.optimizer.RemoveNoopOperators",
+      |       "org.apache.spark.sql.execution.datasources.PruneFileSourcePartitions",
+      |       "org.apache.spark.sql.catalyst.optimizer.LimitPushDown",
+      |       "org.apache.spark.sql.catalyst.optimizer.UnwrapCastInBinaryComparison",
+      |       "org.apache.spark.sql.catalyst.optimizer.PropagateEmptyRelation",
+      |       "org.apache.spark.sql.catalyst.optimizer.BooleanSimplification",
+      |       "org.apache.spark.sql.catalyst.optimizer.ReplaceNullWithFalseInPredicate",
+      |    )
+      |
+      |    val excludedRules = (excludableRules -- criticalRules).mkString(",")
+      |     withoutOptimized(excludedRules) {
       |$insertionMark
       |
       |    fuzzer.core.global.State.unOptDF = Some(sink)
@@ -117,5 +124,11 @@ object Harness {
   def embedCode(template: String, source: String, marker: String, indent: String = ""): String = {
     val indentedSource = source.linesIterator.map(line => indent + line).mkString("\n")
     template.replace(marker, indentedSource)
+  }
+
+  def embedCode(template: String, source: SourceCode, marker: String, indent: String): String = {
+    val indentedSource = source.src.linesIterator.map(line => indent + line).mkString("\n")
+    val preamble = source.preamble
+    template.replace(marker, indentedSource).replace(this.preambleMark, preamble)
   }
 }

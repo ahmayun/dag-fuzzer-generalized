@@ -101,7 +101,7 @@ class DaskDataAdapter(config: FuzzerConfig) extends DataAdapter {
 
   override def getTableByName(name: String): Option[TableMetadata] = ???
 
-  override def loadData(executor: CodeExecutor): Unit = {
+  override def loadData(executor: CodeExecutor, filterF: String => Boolean = _ => true): Unit = {
     // Create JSON request
     val request = Json.obj(
       "message_type" -> "load_data"
@@ -211,6 +211,8 @@ class DaskCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor
       s"List(\n${items.mkString(",\n")}\n${"  " * (indent - 1)})"
     }
   }
+
+  override def executeRaw(source: String): Any = ???
 
   override def execute(sourceCode: SourceCode): ExecutionResult = {
 

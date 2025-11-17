@@ -5,7 +5,9 @@ import org.apache.spark.sql.SparkSession
 
 object TPCDSTablesLoader {
 
-  def loadAll(spark: SparkSession, tpcdsDataPath: String, dbName: String = "main"): Unit = {
+  def loadAll(
+               spark: SparkSession, tpcdsDataPath: String,
+               dbName: String = "main",  filterF: String => Boolean = _ => true): Unit = {
 
 
     deleteDir(s"spark-warehouse/$dbName.db")
@@ -39,7 +41,7 @@ object TPCDSTablesLoader {
       "web_returns",
       "web_sales",
       "web_site"
-    )
+    ).filter(filterF)
 
     // 3. Read each Parquet file, create temp view
     tableNames.foreach { tableName =>

@@ -14,7 +14,9 @@ import org.apache.spark.sql.catalyst.rules.Rule.coverage
 import org.apache.spark.sql.functions.{lit, row_number}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import play.api.libs.json.JsValue
-
+import scala.concurrent._
+import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.tools.reflect.ToolBox
 import java.lang.reflect.InvocationTargetException
 import scala.reflect.runtime.{currentMirror, universe}
@@ -71,9 +73,15 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     val toolbox = currentMirror.mkToolBox()
 
     val throwable = try {
-      toolbox.eval(toolbox.parse(source))
+      val evalFuture = Future {
+        toolbox.eval(toolbox.parse(source))
+      }
+
+      Await.result(evalFuture, 1.seconds)
       new Success("Success")
     } catch {
+      case e: TimeoutException =>
+        new TimeoutException("Execution timed out after 10 seconds")
       case e: InvocationTargetException =>
         e.getCause
       case e: Exception =>

@@ -77,7 +77,7 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
         toolbox.eval(toolbox.parse(source))
       }
 
-      Await.result(evalFuture, 1.seconds)
+      Await.result(evalFuture, 10.seconds)
       new Success("Success")
     } catch {
       case e: TimeoutException =>

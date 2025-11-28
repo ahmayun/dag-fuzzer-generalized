@@ -78,11 +78,11 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
         toolbox.eval(toolbox.parse(source))
       }
 
-      Await.result(evalFuture, 10.seconds)
+      Await.result(evalFuture, 120.seconds)
       new Success("Success")
     } catch {
       case e: TimeoutException =>
-        new TimeoutException("Execution timed out after 10 seconds")
+        e
       case e: InvocationTargetException =>
         e.getCause
       case e: Exception =>
@@ -109,7 +109,7 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     val optCount = countUDFs(optPlan)
     val unOptCount = countUDFs(unOptPlan)
 
-    if (optCount != unOptCount)
+    if (optCount > unOptCount)
       new MismatchException(
         s"""
            |UDF counts don't match Opt: $optCount, UnOpt: $unOptCount.

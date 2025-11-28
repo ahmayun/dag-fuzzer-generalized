@@ -7,6 +7,7 @@ object Harness {
   val insertionMark = "[[INSERT]]"
   val preambleMark = "[[PREAMBLE]]"
   val resultMark = "[[RESULT]]"
+  val timeout = 60
 
   val imports =
     """
@@ -17,6 +18,9 @@ object Harness {
       |import fuzzer.templates.ComplexObject
       |import fuzzer.core.exceptions._
       |import org.apache.spark.sql.expressions.Window
+      |import scala.concurrent._
+      |import scala.concurrent.duration._
+      |import scala.concurrent.ExecutionContext.Implicits.global
       |""".stripMargin
 
   val sparkProgramOptimizationsOn: String =
@@ -36,7 +40,10 @@ object Harness {
       |}
       |
       |try {
+      | val evalFuture = Future {
       |   Optimized.main(Array())
+      | }
+      | Await.result(evalFuture, $timeout.seconds)
       |} catch {
       | case e =>
       |    fuzzer.core.global.State.optRunException = Some(e)
@@ -89,7 +96,10 @@ object Harness {
       |
       |
       |try {
+      | val evalFuture = Future {
       |   UnOptimized.main(Array())
+      | }
+      | Await.result(evalFuture, $timeout.seconds)
       |} catch {
       | case e =>
       |    fuzzer.core.global.State.unOptRunException = Some(e)

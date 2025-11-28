@@ -5,7 +5,7 @@ import fuzzer.core.engine.FuzzerEngine
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph}
 import fuzzer.factory.AdapterFactory
-import fuzzer.framework.{UserImplDaskPython, UserImplFlinkPython, UserImplSparkScala}
+import fuzzer.framework.{UserImplDaskPython, UserImplFlinkPython, UserImplSparkScala, UserImplTFPython}
 import fuzzer.utils.io.ReadWriteUtils._
 import fuzzer.utils.json.JsonReader
 import fuzzer.utils.random.Random
@@ -90,6 +90,7 @@ object MainFuzzer {
       case "spark-scala" => FuzzerConfig.getSparkScalaConfig
       case "flink-python" => FuzzerConfig.getFlinkPythonConfig
       case "dask-python" => FuzzerConfig.getDaskPythonConfig
+      case "tensorflow-python" => FuzzerConfig.getTensorflowPythonConfig
       case _ => throw new IllegalArgumentException(s"Unknown domain: $domain. Expected: spark-scala, flink-python, or dask-python")
     }
 
@@ -101,6 +102,7 @@ object MainFuzzer {
       case "spark-scala" => UserImplSparkScala.dag2SparkScala(spec) _
       case "flink-python" => UserImplFlinkPython.dag2FlinkPython(spec) _
       case "dask-python" => UserImplDaskPython.dag2DaskPython(spec) _
+      case "tensorflow-python" => UserImplTFPython.dag2tensorflowPython(spec) _
       case _ => throw new IllegalArgumentException("Required args not provided")
     }
     val engine = createEngineFromConfig(config, spec, dag2CodeFunc)

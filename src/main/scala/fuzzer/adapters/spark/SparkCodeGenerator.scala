@@ -1,7 +1,7 @@
 package fuzzer.adapters.spark
 
 import fuzzer.code.SourceCode
-import fuzzer.core.exceptions.{MismatchException, Success}
+import fuzzer.core.exceptions.{DAGFuzzerException, MismatchException, Success}
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
@@ -14,6 +14,7 @@ import org.apache.spark.sql.catalyst.rules.Rule.coverage
 import org.apache.spark.sql.functions.{lit, row_number}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import play.api.libs.json.JsValue
+
 import scala.concurrent._
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -243,16 +244,20 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   var session: Option[SparkSession] = None
   override def execute(code: SourceCode): ExecutionResult = {
-    val (result, (optResult, fullSourceOpt), (unOptResult, fullSourceUnOpt)) = checkOneGo(code)
-    val combinedSourceWithResults = constructCombinedFileContents(result, optResult, unOptResult, fullSourceOpt, fullSourceUnOpt)
+    try {
+      val (result, (optResult, fullSourceOpt), (unOptResult, fullSourceUnOpt)) = checkOneGo(code)
+      val combinedSourceWithResults = constructCombinedFileContents(result, optResult, unOptResult, fullSourceOpt, fullSourceUnOpt)
 
-    val success = if(result.isInstanceOf[Success]) true else false
-    ExecutionResult(
-      success = success,
-      exception = result,
-      combinedSourceWithResults = combinedSourceWithResults,
-      coverage = coverage.clone(),
-    )
+      val success = if(result.isInstanceOf[Success]) true else false
+      ExecutionResult(
+        success = success,
+        exception = result,
+        combinedSourceWithResults = combinedSourceWithResults,
+        coverage = coverage.clone(),
+      )
+    } catch {
+      case ex: Throwable => throw new DAGFuzzerException("SparkCodeGenerator.execute() failed!", ex)
+    }
   }
 
   override def setupEnvironment(): () => Unit = {

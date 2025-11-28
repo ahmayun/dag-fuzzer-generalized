@@ -1,3 +1,3 @@
 package fuzzer.core.exceptions
 
-class DAGFuzzerException(message: String, val inner: Exception) extends Exception(message)
+class DAGFuzzerException(message: String, val inner: Throwable) extends Exception(message)

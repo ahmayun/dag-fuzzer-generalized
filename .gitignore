@@ -33,3 +33,4 @@ replay/
 tpcds-csv-*pc/
 tpcds-data-*pc/
 tpcds5pc.zip
+tf-server-log/

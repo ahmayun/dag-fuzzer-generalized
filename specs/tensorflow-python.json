@@ -1,0 +1,312 @@
+{
+  "from_tensor_slices": {
+    "type": "source",
+    "parameters": {
+      "tensors": {
+        "type": "tensor",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "from_tensors": {
+    "type": "source",
+    "parameters": {
+      "tensors": {
+        "type": "tensor",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "range": {
+    "type": "source",
+    "parameters": {
+      "start": {
+        "type": "int",
+        "required": false,
+        "default": 0
+      },
+      "stop": {
+        "type": "int",
+        "required": true
+      },
+      "step": {
+        "type": "int",
+        "required": false,
+        "default": 1
+      }
+    },
+    "returns": "Dataset"
+  },
+  "map": {
+    "type": "unary",
+    "parameters": {
+      "map_func": {
+        "type": "callable",
+        "required": true
+      },
+      "num_parallel_calls": {
+        "type": "int",
+        "required": false,
+        "values": ["AUTOTUNE"]
+      },
+      "deterministic": {
+        "type": "bool",
+        "required": false,
+        "default": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "filter": {
+    "type": "unary",
+    "parameters": {
+      "predicate": {
+        "type": "callable",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "shuffle": {
+    "type": "unary",
+    "parameters": {
+      "buffer_size": {
+        "type": "buffer_size",
+        "required": true
+      },
+      "seed": {
+        "type": "int",
+        "required": false
+      },
+      "reshuffle_each_iteration": {
+        "type": "bool",
+        "required": false,
+        "default": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "take": {
+    "type": "unary",
+    "parameters": {
+      "count": {
+        "type": "int",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "flat_map": {
+    "type": "unary",
+    "parameters": {
+      "map_func": {
+        "type": "callable",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "interleave": {
+    "type": "unary",
+    "parameters": {
+      "map_func": {
+        "type": "callable",
+        "required": true
+      },
+      "cycle_length": {
+        "type": "int",
+        "required": false
+      },
+      "block_length": {
+        "type": "int",
+        "required": false,
+        "default": 1
+      },
+      "num_parallel_calls": {
+        "type": "int",
+        "required": false,
+        "values": ["AUTOTUNE"]
+      },
+      "deterministic": {
+        "type": "bool",
+        "required": false
+      }
+    },
+    "returns": "Dataset"
+  },
+  "reduce": {
+    "type": "unary",
+    "parameters": {
+      "initial_state": {
+        "type": "tensor",
+        "required": true
+      },
+      "reduce_func": {
+        "type": "callable",
+        "required": true
+      }
+    },
+    "returns": "tensor"
+  },
+  "scan": {
+    "type": "unary",
+    "parameters": {
+      "initial_state": {
+        "type": "tensor",
+        "required": true
+      },
+      "scan_func": {
+        "type": "callable",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "apply": {
+    "type": "unary",
+    "parameters": {
+      "transformation_func": {
+        "type": "callable",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "batch": {
+    "type": "unary",
+    "parameters": {
+      "batch_size": {
+        "type": "int",
+        "required": true
+      },
+      "drop_remainder": {
+        "type": "bool",
+        "required": false,
+        "default": false
+      },
+      "num_parallel_calls": {
+        "type": "int",
+        "required": false
+      },
+      "deterministic": {
+        "type": "bool",
+        "required": false
+      }
+    },
+    "returns": "Dataset"
+  },
+  "prefetch": {
+    "type": "unary",
+    "parameters": {
+      "buffer_size": {
+        "type": "int",
+        "required": true,
+        "values": ["AUTOTUNE"]
+      }
+    },
+    "returns": "Dataset"
+  },
+  "cache": {
+    "type": "unary",
+    "parameters": {
+      "filename": {
+        "type": "string",
+        "required": false,
+        "default": ""
+      }
+    },
+    "returns": "Dataset"
+  },
+  "repeat": {
+    "type": "unary",
+    "parameters": {
+      "count": {
+        "type": "int",
+        "required": false,
+        "default": -1
+      }
+    },
+    "returns": "Dataset"
+  },
+  "skip": {
+    "type": "unary",
+    "parameters": {
+      "count": {
+        "type": "int",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "window": {
+    "type": "unary",
+    "parameters": {
+      "size": {
+        "type": "int",
+        "required": true
+      },
+      "shift": {
+        "type": "int",
+        "required": false
+      },
+      "stride": {
+        "type": "int",
+        "required": false,
+        "default": 1
+      },
+      "drop_remainder": {
+        "type": "bool",
+        "required": false,
+        "default": false
+      }
+    },
+    "returns": "Dataset"
+  },
+  "unbatch": {
+    "type": "unary",
+    "parameters": {},
+    "returns": "Dataset"
+  },
+  "enumerate": {
+    "type": "unary",
+    "parameters": {
+      "start": {
+        "type": "int",
+        "required": false,
+        "default": 0
+      }
+    },
+    "returns": "Dataset"
+  },
+  "shard": {
+    "type": "unary",
+    "parameters": {
+      "num_shards": {
+        "type": "int",
+        "required": true
+      },
+      "index": {
+        "type": "int",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "concatenate": {
+    "type": "binary",
+    "parameters": {
+      "dataset": {
+        "type": "Dataset",
+        "required": true
+      }
+    },
+    "returns": "Dataset"
+  },
+  "zip": {
+    "type": "binary",
+    "parameters": {},
+    "returns": "Dataset"
+  }
+}

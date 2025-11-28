@@ -131,4 +131,35 @@ object FuzzerConfig {
     )
   }
 
+  def getTensorflowPythonConfig: FuzzerConfig = {
+    FuzzerConfig(
+      master = "local[*]",
+      targetAPI = "tensorflow-python",
+      specPath ="specs/tensorflow-python.json",
+      exitAfterNSuccesses = true,
+      N = 200,
+      d = 200,
+      p = 5,
+      outDir = "./target/dagfuzz-out/tensorflow-python",
+      outExt = ".py",
+      timeLimitSec = 10,
+      dagGenDir = "dag-gen/DAGs/DAGs",
+      localTpcdsPath = "tpcds-data",
+      seed = "ahmad35".hashCode,
+      maxStringLength = 5,
+      updateLiveStatsAfter = 10,
+      intermediateVarPrefix = "auto",
+      finalVariableName = "sink",
+      probUDFInsert = 0.1,
+      maxListLength = 1,
+      randIntMin = -50,
+      randIntMax = 50,
+      randFloatMin = -50.0,
+      randFloatMax = 50.0,
+      logicalOperatorSet = Set(">", "<", ">=", "<="),
+      replay = false,
+      artifactsDir = null
+    )
+  }
+
 }

@@ -476,11 +476,7 @@ val excludedRules = (excludableRules -- criticalRules).mkString(",")
             val sourceCode = generateSingleProgram(dag, spec, codeGenerator.getDag2CodeFunc, selectedTables)
             println(s"-> EXECUTING g_${stats.getGenerated}-a_${stats.getAttempts}")
 
-            val results = if (true || stats.getGenerated == 10) {
-              codeExecutor.execute(sourceCode)
-            } else {
-              ExecutionResult(success = false, new Success(""))
-            }
+            val results = codeExecutor.execute(sourceCode)
 
             stats.setCumulativeCoverageIfChanged(
               results.coverage,

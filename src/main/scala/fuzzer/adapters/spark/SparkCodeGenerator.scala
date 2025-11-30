@@ -244,7 +244,12 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   var session: Option[SparkSession] = None
   override def execute(code: SourceCode): ExecutionResult = {
-    try {
+
+    setupEnvironment()
+    val session = fuzzer.core.global.State.sparkOption.get
+    TPCDSTablesLoader.loadAll(session, config.localTpcdsPath, dbName = "tpcds", _ => true)
+
+    val ret = try {
       val (result, (optResult, fullSourceOpt), (unOptResult, fullSourceUnOpt)) = checkOneGo(code)
       val combinedSourceWithResults = constructCombinedFileContents(result, optResult, unOptResult, fullSourceOpt, fullSourceUnOpt)
 
@@ -256,8 +261,20 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
         coverage = coverage.clone(),
       )
     } catch {
-      case ex: Throwable => throw new DAGFuzzerException("SparkCodeGenerator.execute() failed!", ex)
+      case ex: Throwable =>
+        ExecutionResult(
+          success = false,
+          exception = ex,
+          combinedSourceWithResults = code.src,
+        )
+//        throw new DAGFuzzerException("SparkCodeGenerator.execute() failed!", ex)
     }
+
+    session.sqlContext.clearCache()
+    session.catalog.clearCache()
+    session.close()
+
+    ret
   }
 
   override def setupEnvironment(): () => Unit = {

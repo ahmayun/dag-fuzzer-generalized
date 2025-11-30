@@ -52,7 +52,7 @@ object TPCDSTablesLoader {
     // 4. Promote each temp view to a managed table inside "main"
     tableNames.foreach { tableName =>
       println(s"Creating table in sparksql $tableName...")
-      spark.sql(s"CREATE TABLE $dbName.$tableName USING parquet AS SELECT * FROM $tableName")
+      spark.sql(s"CREATE TABLE IF NOT EXISTS $dbName.$tableName USING parquet AS SELECT * FROM $tableName")
     }
 
   }

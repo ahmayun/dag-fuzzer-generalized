@@ -192,6 +192,9 @@ class FuzzerEngine(
       case ex: DAGFuzzerException =>
         println(s"ERROR MSG: ${ex.inner.getMessage}")
         codeExecutor.tearDownEnvironment(terminateF)
+        println("==== INNER ====")
+        println(ex.inner)
+        println("=========")
         throw ex.inner
     }
   }

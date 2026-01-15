@@ -199,248 +199,252 @@ class FuzzerEngine(
     }
   }
 
-  def scalaFilesLazy(replayPath: String): LazyList[File] = {
-    val replayDir = new File(replayPath)
+//  def scalaFilesLazy(replayPath: String): LazyList[File] = {
+//    val replayDir = new File(replayPath)
+//
+//    def filesInDir(dir: File, inSuccessDir: Boolean): LazyList[File] = {
+//      if (!dir.exists() || !dir.isDirectory) {
+//        LazyList.empty
+//      } else {
+//        // Check if THIS directory is named "Success"
+//        val isSuccess = dir.getName == "Success"
+//        val shouldCollect = inSuccessDir || isSuccess
+//
+//        val (dirs, files) = dir.listFiles().partition(_.isDirectory)
+//
+//        // Only collect scala files if we're inside a "Success" directory
+//        val scalaFiles = if (shouldCollect) {
+//          LazyList.from(files.filter(_.getName.endsWith(".scala")))
+//        } else {
+//          LazyList.empty
+//        }
+//
+//        // Recursively process subdirectories
+//        val subDirFiles = LazyList.from(dirs).flatMap(d =>
+//          filesInDir(d, shouldCollect)
+//        )
+//
+//        scalaFiles #::: subDirFiles
+//      }
+//    }
+//
+//    filesInDir(replayDir, inSuccessDir = false)
+//  }
 
-    def filesInDir(dir: File, inSuccessDir: Boolean): LazyList[File] = {
-      if (!dir.exists() || !dir.isDirectory) {
-        LazyList.empty
-      } else {
-        // Check if THIS directory is named "Success"
-        val isSuccess = dir.getName == "Success"
-        val shouldCollect = inSuccessDir || isSuccess
+//  def replaceExplainWithShow(code: String): String = {
+//    code.replace("sink.explain(true)", "println(sink.show())")
+//  }
 
-        val (dirs, files) = dir.listFiles().partition(_.isDirectory)
+//  def movePreloadedUDFOutOfObject(code: String): String = {
+//    // Find the start: line containing "val preloadedUDF = udf((s: Any) => {"
+//    val startPattern = """val preloadedUDF = udf\(\(s: Any\) => \{""".r
+//
+//    var modifiedCode = code
+//    var udfBlock: Option[String] = None
+//
+//    // Find and remove all occurrences of preloadedUDF
+//    var continue = true
+//    while (continue) {
+//      startPattern.findFirstMatchIn(modifiedCode) match {
+//        case Some(startMatch) =>
+//          val startIndex = startMatch.start
+//
+//          // Find the closing "}).asNondeterministic()" after preloadedUDF
+//          val closingPattern = """\}\s*\)\s*\.asNondeterministic\s*\(\s*\)""".r
+//
+//          closingPattern.findFirstMatchIn(modifiedCode.substring(startIndex)) match {
+//            case Some(closingMatch) =>
+//              val endIndex = startIndex + closingMatch.end
+//
+//              // Extract the preloadedUDF block (save it only once)
+//              if (udfBlock.isEmpty) {
+//                udfBlock = Some(modifiedCode.substring(startIndex, endIndex))
+//              }
+//
+//              // Remove this occurrence
+//              modifiedCode = modifiedCode.substring(0, startIndex) + modifiedCode.substring(endIndex)
+//
+//            case None =>
+//              continue = false
+//          }
+//
+//        case None =>
+//          continue = false
+//      }
+//    }
+//
+//    // If we found at least one UDF, insert it before the first object
+//    udfBlock match {
+//      case Some(block) =>
+//        val objectPattern = """(?m)^(\s*)object\s+\w+""".r
+//
+//        objectPattern.findFirstMatchIn(modifiedCode) match {
+//          case Some(objMatch) =>
+//            val insertIndex = objMatch.start
+//
+//            // Insert UDF block before object
+//            modifiedCode.substring(0, insertIndex) +
+//              block + "\n\n" +
+//              modifiedCode.substring(insertIndex)
+//
+//          case None =>
+//            // No object found, return modified code
+//            modifiedCode
+//        }
+//
+//      case None =>
+//        // No UDF found, return original
+//        code
+//    }
+//  }
 
-        // Only collect scala files if we're inside a "Success" directory
-        val scalaFiles = if (shouldCollect) {
-          LazyList.from(files.filter(_.getName.endsWith(".scala")))
-        } else {
-          LazyList.empty
-        }
+//  def moveFilterUDFsOutOfObject(code: String): String = {
+//    // Find the start: line containing "val filterUdfString = udf((arg: String) => {"
+//    val startPattern = """val filterUdfString = udf\(\(arg: String\) => \{""".r
+//
+//    // Find the end: the closing of "val filterUdfDecimal = udf((arg: Double) => {"
+//    val filterUdfDecimalStart = """val filterUdfDecimal = udf\(\(arg: Double\) => \{""".r
+//
+//    var modifiedCode = code
+//    var udfBlock: Option[String] = None
+//
+//    // Find and remove all occurrences of the filter UDFs block
+//    var continue = true
+//    while (continue) {
+//      startPattern.findFirstMatchIn(modifiedCode) match {
+//        case Some(startMatch) =>
+//          val startIndex = startMatch.start
+//
+//          // Find where filterUdfDecimal starts
+//          filterUdfDecimalStart.findFirstMatchIn(modifiedCode.substring(startIndex)) match {
+//            case Some(endDeclMatch) =>
+//              val endDeclIndex = startIndex + endDeclMatch.start
+//
+//              // Now find the closing "}).asNondeterministic()" after filterUdfDecimal
+//              val closingPattern = """\}\s*\)\s*\.asNondeterministic\s*\(\s*\)""".r
+//
+//              // Search for the first closing pattern after filterUdfDecimal declaration
+//              closingPattern.findFirstMatchIn(modifiedCode.substring(endDeclIndex)) match {
+//                case Some(closingMatch) =>
+//                  val endIndex = endDeclIndex + closingMatch.end
+//
+//                  // Extract the filter UDFs block (save it only once)
+//                  if (udfBlock.isEmpty) {
+//                    udfBlock = Some(modifiedCode.substring(startIndex, endIndex))
+//                  }
+//
+//                  // Remove this occurrence
+//                  modifiedCode = modifiedCode.substring(0, startIndex) + modifiedCode.substring(endIndex)
+//
+//                case None =>
+//                  continue = false
+//              }
+//
+//            case None =>
+//              continue = false
+//          }
+//
+//        case None =>
+//          continue = false
+//      }
+//    }
+//
+//    // If we found at least one UDF block, insert it before the first object
+//    udfBlock match {
+//      case Some(block) =>
+//        val objectPattern = """(?m)^(\s*)object\s+\w+""".r
+//
+//        objectPattern.findFirstMatchIn(modifiedCode) match {
+//          case Some(objMatch) =>
+//            val insertIndex = objMatch.start
+//
+//            // Insert UDF block before object
+//            modifiedCode.substring(0, insertIndex) +
+//              block + "\n\n" +
+//              modifiedCode.substring(insertIndex)
+//
+//          case None =>
+//            // No object found, return modified code
+//            modifiedCode
+//        }
+//
+//      case None =>
+//        // No UDF found, return original
+//        code
+//    }
+//  }
 
-        // Recursively process subdirectories
-        val subDirFiles = LazyList.from(dirs).flatMap(d =>
-          filesInDir(d, shouldCollect)
-        )
+//  def moveUDFsOutOfObject(code: String): String = {
+//    // First pass: move preloadedUDF
+//    val afterFirstPass = movePreloadedUDFOutOfObject(code)
+//
+//    // Second pass: move the three filter UDFs
+//    moveFilterUDFsOutOfObject(afterFirstPass)
+//  }
 
-        scalaFiles #::: subDirFiles
-      }
-    }
+//  def replaceExcludedRulesLine(code: String): String = {
+//    val oldLine = """val excludedRules = excludableRules.mkString\(","\)"""
+//
+//    val newCode = """val criticalRules = Set(
+//  "org.apache.spark.sql.catalyst.optimizer.PruneFilters",
+//  "org.apache.spark.sql.catalyst.optimizer.ColumnPruning",
+//  "org.apache.spark.sql.catalyst.optimizer.RemoveNoopOperators",
+//  "org.apache.spark.sql.execution.datasources.PruneFileSourcePartitions",
+//  "org.apache.spark.sql.catalyst.optimizer.LimitPushDown",
+//  "org.apache.spark.sql.catalyst.optimizer.UnwrapCastInBinaryComparison",
+//  "org.apache.spark.sql.catalyst.optimizer.PropagateEmptyRelation",
+//  "org.apache.spark.sql.catalyst.optimizer.BooleanSimplification",
+//  "org.apache.spark.sql.catalyst.optimizer.ReplaceNullWithFalseInPredicate",
+//)
+//val excludedRules = (excludableRules -- criticalRules).mkString(",")
+//"""
+//
+//    val pattern = oldLine.r
+//
+//    pattern.replaceAllIn(code, newCode)
+//  }
 
-    filesInDir(replayDir, inSuccessDir = false)
-  }
-
-  def replaceExplainWithShow(code: String): String = {
-    code.replace("sink.explain(true)", "println(sink.show())")
-  }
-
-  def movePreloadedUDFOutOfObject(code: String): String = {
-    // Find the start: line containing "val preloadedUDF = udf((s: Any) => {"
-    val startPattern = """val preloadedUDF = udf\(\(s: Any\) => \{""".r
-
-    var modifiedCode = code
-    var udfBlock: Option[String] = None
-
-    // Find and remove all occurrences of preloadedUDF
-    var continue = true
-    while (continue) {
-      startPattern.findFirstMatchIn(modifiedCode) match {
-        case Some(startMatch) =>
-          val startIndex = startMatch.start
-
-          // Find the closing "}).asNondeterministic()" after preloadedUDF
-          val closingPattern = """\}\s*\)\s*\.asNondeterministic\s*\(\s*\)""".r
-
-          closingPattern.findFirstMatchIn(modifiedCode.substring(startIndex)) match {
-            case Some(closingMatch) =>
-              val endIndex = startIndex + closingMatch.end
-
-              // Extract the preloadedUDF block (save it only once)
-              if (udfBlock.isEmpty) {
-                udfBlock = Some(modifiedCode.substring(startIndex, endIndex))
-              }
-
-              // Remove this occurrence
-              modifiedCode = modifiedCode.substring(0, startIndex) + modifiedCode.substring(endIndex)
-
-            case None =>
-              continue = false
-          }
-
-        case None =>
-          continue = false
-      }
-    }
-
-    // If we found at least one UDF, insert it before the first object
-    udfBlock match {
-      case Some(block) =>
-        val objectPattern = """(?m)^(\s*)object\s+\w+""".r
-
-        objectPattern.findFirstMatchIn(modifiedCode) match {
-          case Some(objMatch) =>
-            val insertIndex = objMatch.start
-
-            // Insert UDF block before object
-            modifiedCode.substring(0, insertIndex) +
-              block + "\n\n" +
-              modifiedCode.substring(insertIndex)
-
-          case None =>
-            // No object found, return modified code
-            modifiedCode
-        }
-
-      case None =>
-        // No UDF found, return original
-        code
-    }
-  }
-
-  def moveFilterUDFsOutOfObject(code: String): String = {
-    // Find the start: line containing "val filterUdfString = udf((arg: String) => {"
-    val startPattern = """val filterUdfString = udf\(\(arg: String\) => \{""".r
-
-    // Find the end: the closing of "val filterUdfDecimal = udf((arg: Double) => {"
-    val filterUdfDecimalStart = """val filterUdfDecimal = udf\(\(arg: Double\) => \{""".r
-
-    var modifiedCode = code
-    var udfBlock: Option[String] = None
-
-    // Find and remove all occurrences of the filter UDFs block
-    var continue = true
-    while (continue) {
-      startPattern.findFirstMatchIn(modifiedCode) match {
-        case Some(startMatch) =>
-          val startIndex = startMatch.start
-
-          // Find where filterUdfDecimal starts
-          filterUdfDecimalStart.findFirstMatchIn(modifiedCode.substring(startIndex)) match {
-            case Some(endDeclMatch) =>
-              val endDeclIndex = startIndex + endDeclMatch.start
-
-              // Now find the closing "}).asNondeterministic()" after filterUdfDecimal
-              val closingPattern = """\}\s*\)\s*\.asNondeterministic\s*\(\s*\)""".r
-
-              // Search for the first closing pattern after filterUdfDecimal declaration
-              closingPattern.findFirstMatchIn(modifiedCode.substring(endDeclIndex)) match {
-                case Some(closingMatch) =>
-                  val endIndex = endDeclIndex + closingMatch.end
-
-                  // Extract the filter UDFs block (save it only once)
-                  if (udfBlock.isEmpty) {
-                    udfBlock = Some(modifiedCode.substring(startIndex, endIndex))
-                  }
-
-                  // Remove this occurrence
-                  modifiedCode = modifiedCode.substring(0, startIndex) + modifiedCode.substring(endIndex)
-
-                case None =>
-                  continue = false
-              }
-
-            case None =>
-              continue = false
-          }
-
-        case None =>
-          continue = false
-      }
-    }
-
-    // If we found at least one UDF block, insert it before the first object
-    udfBlock match {
-      case Some(block) =>
-        val objectPattern = """(?m)^(\s*)object\s+\w+""".r
-
-        objectPattern.findFirstMatchIn(modifiedCode) match {
-          case Some(objMatch) =>
-            val insertIndex = objMatch.start
-
-            // Insert UDF block before object
-            modifiedCode.substring(0, insertIndex) +
-              block + "\n\n" +
-              modifiedCode.substring(insertIndex)
-
-          case None =>
-            // No object found, return modified code
-            modifiedCode
-        }
-
-      case None =>
-        // No UDF found, return original
-        code
-    }
-  }
-
-  def moveUDFsOutOfObject(code: String): String = {
-    // First pass: move preloadedUDF
-    val afterFirstPass = movePreloadedUDFOutOfObject(code)
-
-    // Second pass: move the three filter UDFs
-    moveFilterUDFsOutOfObject(afterFirstPass)
-  }
-
-  def replaceExcludedRulesLine(code: String): String = {
-    val oldLine = """val excludedRules = excludableRules.mkString\(","\)"""
-
-    val newCode = """val criticalRules = Set(
-  "org.apache.spark.sql.catalyst.optimizer.PruneFilters",
-  "org.apache.spark.sql.catalyst.optimizer.ColumnPruning",
-  "org.apache.spark.sql.catalyst.optimizer.RemoveNoopOperators",
-  "org.apache.spark.sql.execution.datasources.PruneFileSourcePartitions",
-  "org.apache.spark.sql.catalyst.optimizer.LimitPushDown",
-  "org.apache.spark.sql.catalyst.optimizer.UnwrapCastInBinaryComparison",
-  "org.apache.spark.sql.catalyst.optimizer.PropagateEmptyRelation",
-  "org.apache.spark.sql.catalyst.optimizer.BooleanSimplification",
-  "org.apache.spark.sql.catalyst.optimizer.ReplaceNullWithFalseInPredicate",
-)
-val excludedRules = (excludableRules -- criticalRules).mkString(",")
-"""
-
-    val pattern = oldLine.r
-
-    pattern.replaceAllIn(code, newCode)
-  }
-
-  def preprocessSparkCode(code: String): String = {
-    val withCommentFix = code + "*/"
-    val withShow = replaceExplainWithShow(withCommentFix)
-    val withUDFsMoved = moveUDFsOutOfObject(withShow)
-    val finalCode = replaceExcludedRulesLine(withUDFsMoved)
-
-    finalCode
-  }
-
+//  def preprocessSparkCode(code: String): String = {
+//    val withCommentFix = code + "*/"
+//    val withShow = replaceExplainWithShow(withCommentFix)
+//    val withUDFsMoved = moveUDFsOutOfObject(withShow)
+//    val finalCode = replaceExcludedRulesLine(withUDFsMoved)
+//
+//    finalCode
+//  }
   def replay(): FuzzerResults = {
-    val stats = new CampaignStats()
-
-    val terminateF = codeExecutor.setupEnvironment()
-    dataAdapter.loadData(codeExecutor, s => Array("time_dim", "promotion").contains(s))
-
-    // here the spec path is actually the path to artifacts dir
-    val lazyFileIter = scalaFilesLazy(config.artifactsDir)
-
-    try {
-      lazyFileIter.foreach { f =>
-        println(s"===== START: $f =====")
-        val contents = Using(scala.io.Source.fromFile(f))(_.mkString).get
-        val executable = preprocessSparkCode(contents)
-        codeExecutor.executeRaw(executable)
-        println(s"===== END: $f =====")
-      }
-
-      // Return final results
-      codeExecutor.tearDownEnvironment(terminateF)
-      FuzzerResults(stats)
-    } catch {
-      case ex: DAGFuzzerException =>
-        println(s"ERROR MSG: ${ex.inner.getMessage}")
-        codeExecutor.tearDownEnvironment(terminateF)
-        throw ex.inner
-    }
+    // TODO: Implement replaying from existing campaign log
+    FuzzerResults(new CampaignStats())
   }
+
+//  def replay(): FuzzerResults = {
+//    val stats = new CampaignStats()
+//
+//    val terminateF = codeExecutor.setupEnvironment()
+//    dataAdapter.loadData(codeExecutor, s => Array("time_dim", "promotion").contains(s))
+//
+//    // here the spec path is actually the path to artifacts dir
+//    val lazyFileIter = scalaFilesLazy(config.artifactsDir)
+//
+//    try {
+//      lazyFileIter.foreach { f =>
+//        println(s"===== START: $f =====")
+//        val contents = Using(scala.io.Source.fromFile(f))(_.mkString).get
+//        val executable = preprocessSparkCode(contents)
+//        codeExecutor.executeRaw(executable)
+//        println(s"===== END: $f =====")
+//      }
+//
+//      // Return final results
+//      codeExecutor.tearDownEnvironment(terminateF)
+//      FuzzerResults(stats)
+//    } catch {
+//      case ex: DAGFuzzerException =>
+//        println(s"ERROR MSG: ${ex.inner.getMessage}")
+//        codeExecutor.tearDownEnvironment(terminateF)
+//        throw ex.inner
+//    }
+//  }
 
   def isInvalidDFG(dag: Graph[DFOperator]): (Boolean, String) = {
     dag match {
@@ -477,9 +481,17 @@ val excludedRules = (excludableRules -- criticalRules).mkString(",")
             // --- Sampling tables with replacement ---
             val selectedTables = (1 to dag.getSourceNodes.length).map(_ => allTables(Random.nextInt(allTables.length))).toList
             val sourceCode = generateSingleProgram(dag, spec, codeGenerator.getDag2CodeFunc, selectedTables)
-            println(s"-> EXECUTING g_${stats.getGenerated}-a_${stats.getAttempts}")
+            println(s"-> EXECUTING g_${stats.getGenerated}-a_${stats.getAttempts}...")
+
+            if(config.debugMode) {
+              println("[DEBUG] Generated Source ====== ")
+              println(sourceCode.preamble)
+              println(sourceCode.src)
+              println("===============================")
+            }
 
             val results = codeExecutor.execute(sourceCode)
+            println(" Executed!")
 
             stats.setCumulativeCoverageIfChanged(
               results.coverage,
@@ -497,11 +509,11 @@ val excludedRules = (excludableRules -- criticalRules).mkString(",")
                 println(s"RESULT: $result")
                 println(s"$ruleBranchesCovered")
               case _: MismatchException =>
-                println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration}====")
+                println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration} GENERATED: ${stats.getGenerated}====")
                 println(s"RESULT: $result")
                 println(s"$ruleBranchesCovered")
               case _ =>
-                println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration}====")
+                println(s"==== FUZZER ITERATION ${fuzzer.core.global.State.iteration} GENERATED: ${stats.getGenerated}====")
                 println(s"RESULT: $resultType")
             }
             stats.updateWith(resultType) {
@@ -525,10 +537,10 @@ val excludedRules = (excludableRules -- criticalRules).mkString(",")
             if (stats.getGenerated % config.updateLiveStatsAfter == 0) {
               writeLiveStats(config, stats, startTime)
             }
-
             stats.setGenerated(stats.getGenerated+1)
           } catch {
             case ex: DAGFuzzerException => throw ex
+            case ex: java.net.ConnectException => throw new DAGFuzzerException(ex.getMessage, inner = ex)
             case ex: Exception =>
               println("==========")
               println(s"DFG construction or codegen failed, attempt #$i. Reason: $ex")

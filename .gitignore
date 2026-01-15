@@ -34,3 +34,13 @@ tpcds-csv-*pc/
 tpcds-data-*pc/
 tpcds5pc.zip
 tf-server-log/
+.logs/
+bug-repo/
+playground/
+oracle-servers/polars-oracle-server/basic-json-server-saved.py
+oracle-servers/polars-oracle-server/test.py
+oracle-servers/polars-oracle-server/test2.py
+oracle-servers/polars-oracle-server/test3.py
+oracle-servers/polars-oracle-server/test4-timeout-diagnosis.py
+requirements.txt
+udf-gen.py

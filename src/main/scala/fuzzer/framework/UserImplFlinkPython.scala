@@ -11,8 +11,6 @@ import scala.collection.mutable
 
 object UserImplFlinkPython {
 
-
-
   def constructDFOCall(spec: JsValue, node: Node[DFOperator], in1: String, in2: String): String = {
     val opName = node.value.name
     val opSpec = spec \ opName

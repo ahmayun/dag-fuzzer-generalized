@@ -26,7 +26,8 @@ case class FuzzerConfig(
                          randFloatMax: Double,
                          logicalOperatorSet: Set[String],
                          replay: Boolean,
-                         artifactsDir: String
+                         artifactsDir: String,
+                         debugMode: Boolean
                        )
 
 object FuzzerConfig {
@@ -65,7 +66,8 @@ object FuzzerConfig {
       randFloatMax = 50.0,
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
-      artifactsDir = null
+      artifactsDir = null,
+      debugMode = false
     )
   }
 
@@ -96,7 +98,8 @@ object FuzzerConfig {
       randFloatMax = 50.0,
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
-      artifactsDir = null
+      artifactsDir = null,
+      debugMode = false
     )
   }
 
@@ -127,7 +130,8 @@ object FuzzerConfig {
       randFloatMax = 50.0,
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
-      artifactsDir = null
+      artifactsDir = null,
+      debugMode = false
     )
   }
 
@@ -158,8 +162,40 @@ object FuzzerConfig {
       randFloatMax = 50.0,
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
-      artifactsDir = null
+      artifactsDir = null,
+      debugMode = false
     )
   }
 
+  def getPolarsPythonConfig: FuzzerConfig = {
+    FuzzerConfig(
+      master = "local[*]",
+      targetAPI = "polars-python",
+      specPath ="specs/polars-python.json",
+      exitAfterNSuccesses = true,
+      N = 140,
+      d = 200,
+      p = 5,
+      outDir = "./target/dagfuzz-out/polars-python",
+      outExt = ".py",
+      timeLimitSec = 10,
+      dagGenDir = "dag-gen/DAGs/DAGs",
+      localTpcdsPath = "tpcds-data-5pc",
+      seed = "ahmad35".hashCode,
+      maxStringLength = 5,
+      updateLiveStatsAfter = 10,
+      intermediateVarPrefix = "auto",
+      finalVariableName = "sink",
+      probUDFInsert = 0.1,
+      maxListLength = 1,
+      randIntMin = -50,
+      randIntMax = 50,
+      randFloatMin = -50.0,
+      randFloatMax = 50.0,
+      logicalOperatorSet = Set(">", "<", ">=", "<="),
+      replay = false,
+      artifactsDir = null,
+      debugMode = false
+    )
+  }
 }

@@ -587,7 +587,7 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
 
         self.setup_logging_directory(GLOBAL_STATE.log_dir)
 
-        GLOBAL_STATE.table_schemas = self.load_tpcds_schema("pyflink-oracle-server/tpcds-schema.json")
+        GLOBAL_STATE.table_schemas = self.load_tpcds_schema("oracle-servers/tpcds-schema.json")
         # Initialize Dask environment once
         GLOBAL_STATE.dask_namespace = self.setup_dask_environment()
 

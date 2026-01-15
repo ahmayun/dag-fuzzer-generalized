@@ -293,10 +293,10 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     val newJavaOpts = if (currentJavaOpts.isEmpty) jacocoAgent else s"$currentJavaOpts $jacocoAgent"
 
     val processBuilder = Process(
-      "pyflink-oracle-server/venv/bin/python pyflink-oracle-server/basic-json-server.py",
+      "oracle-servers/venv/bin/python oracle-servers/pyflink-oracle-server/basic-json-server.py",
       None,
       "JAVA_TOOL_OPTIONS" -> newJavaOpts
-    ) #> new File(".server.log")
+    ) #> new File("oracle-servers/.logs/pyflink-server.log")
 
     val process = processBuilder.run()
     Thread.sleep(500)

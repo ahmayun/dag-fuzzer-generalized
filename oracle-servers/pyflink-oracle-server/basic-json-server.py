@@ -1114,7 +1114,7 @@ class FlinkFuzzingHandler(BaseHTTPRequestHandler):
         catalog_name = None
         self.setup_logging_directory(GLOBAL_STATE.log_dir)
 
-        GLOBAL_STATE.table_schemas = self.load_tpcds_schema("pyflink-oracle-server/tpcds-schema.json")
+        GLOBAL_STATE.table_schemas = self.load_tpcds_schema("oracle-servers/tpcds-schema.json")
         # Initialize Flink environment once
 
         if 'catalog_name' in request_dict:

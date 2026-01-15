@@ -2,7 +2,7 @@ package fuzzer.adapters.tensorflow
 
 import fuzzer.code.SourceCode
 import fuzzer.core.exceptions
-import fuzzer.core.exceptions.{MismatchException, TableException, ValidationException}
+import fuzzer.core.exceptions.{AttributeError, InvalidArgumentError, MismatchException, TableException, TimeoutError, TypeError, ValidationException, ValueError}
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
@@ -251,6 +251,11 @@ class TensorflowCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeEx
       case "RuntimeException" => new RuntimeException(errorMessage)
       case "TableException" => new TableException(errorMessage)
       case "MismatchException" => new MismatchException(errorMessage)
+      case "AttributeError" => new AttributeError(errorMessage)
+      case "TypeError" => new TypeError(errorMessage)
+      case "ValueError" => new ValueError(errorMessage)
+      case "InvalidArgumentError" => new InvalidArgumentError(errorMessage)
+      case "TimeoutError" => new TimeoutError(errorMessage)
       case "Success" | "" => new exceptions.Success("Generated query hit the optimizer")
 //      case "ValueError" => new ValidationException(errorMessage)
 //      case "KeyError" => new TableException(errorMessage)
@@ -277,9 +282,9 @@ class TensorflowCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeEx
 
   override def setupEnvironment(): () => Unit = {
     val processBuilder = Process(
-      "pyflink-oracle-server/venv/bin/python tensorflow-oracle-server/basic-json-server.py",
+      "oracle-servers/venv/bin/python oracle-servers/tensorflow-oracle-server/basic-json-server.py",
       None
-    ) #> new File(".tensorflow-server.log")
+    ) #> new File("oracle-servers/.logs/tensorflow-server.log")
 
     val process = processBuilder.run()
     Thread.sleep(500)

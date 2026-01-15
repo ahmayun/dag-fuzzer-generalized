@@ -12,6 +12,7 @@ libraryDependencies ++= Seq(
   "com.typesafe.play" %% "play-json" % "2.9.4",
   "org.yaml" % "snakeyaml" % "2.2",
   "org.scala-lang" % "scala-compiler" % scalaVersion.value,
+  "net.bytebuddy" % "byte-buddy" % "1.14.11"
 
 )
 

@@ -1,0 +1,151 @@
+{
+  "pl.scan_parquet": {
+    "type": "source",
+    "parameters": {
+      "source": {
+        "type": "string",
+        "required": true,
+        "description": "Path to CSV file"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "rename": {
+    "type": "unary",
+    "parameters": {
+      "mapping": {
+        "type": "dict",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-rename",
+        "description": "Dictionary mapping old names to new names"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "group_by": {
+    "type": "unary",
+    "parameters": {
+      "by": {
+        "type": "IntoExpr | Iterable[IntoExpr]",
+        "required": true,
+        "description": "Column(s) to group by"
+      }
+    },
+    "returns": "GroupBy"
+  },
+  "join": {
+    "type": "binary",
+    "parameters": {
+      "other": {
+        "type": "DataFrame",
+        "required": true
+      },
+      "on": {
+        "type": "str | Expr | list",
+        "required": false,
+        "description": "Column(s) to join on"
+      },
+      "left_on": {
+        "type": "str | Expr | list",
+        "required": false,
+        "description": "Left DataFrame column(s)"
+      },
+      "right_on": {
+        "type": "str | Expr | list",
+        "required": false,
+        "description": "Right DataFrame column(s)"
+      },
+      "how": {
+        "type": "str",
+        "required": false,
+        "default": "inner",
+        "values": ["inner", "left", "right", "outer", "semi", "anti", "cross"]
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "with_columns": {
+    "type": "unary",
+    "parameters": {
+      "exprs": {
+        "type": "IntoExpr | Iterable[IntoExpr]",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-add",
+        "description": "Column expressions to add"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "filter": {
+    "type": "unary",
+    "parameters": {
+      "predicate": {
+        "type": "Expr | list[Expr]",
+        "required": true,
+        "description": "Boolean expression(s) to filter rows"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "select": {
+    "type": "unary",
+    "parameters": {
+      "exprs": {
+        "type": "IntoExpr | Iterable[IntoExpr]",
+        "required": true,
+        "state-altering": true,
+        "state-effect": "column-filter",
+        "description": "Column expressions to select"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "sort": {
+    "type": "unary",
+    "parameters": {
+      "by": {
+        "type": "IntoExpr | Iterable[IntoExpr]",
+        "required": true,
+        "description": "Column(s) to sort by"
+      },
+      "descending": {
+        "type": "bool | list[bool]",
+        "required": false,
+        "default": false,
+        "description": "Sort in descending order"
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "unique": {
+    "type": "unary",
+    "parameters": {
+      "subset": {
+        "type": "str | list[str]",
+        "required": false,
+        "default": null,
+        "description": "Column(s) to use for uniqueness"
+      },
+      "keep": {
+        "type": "str",
+        "required": false,
+        "default": "first",
+        "values": ["first", "last", "none"]
+      }
+    },
+    "returns": "DataFrame"
+  },
+  "limit": {
+    "type": "unary",
+    "parameters": {
+      "n": {
+        "type": "int",
+        "required": true,
+        "description": "Number of rows to return"
+      }
+    },
+    "returns": "DataFrame"
+  }
+}

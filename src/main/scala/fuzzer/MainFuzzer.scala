@@ -5,7 +5,7 @@ import fuzzer.core.engine.FuzzerEngine
 import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DFOperator, Graph}
 import fuzzer.factory.AdapterFactory
-import fuzzer.framework.{UserImplDaskPython, UserImplFlinkPython, UserImplSparkScala, UserImplTFPython}
+import fuzzer.framework.{UserImplDaskPython, UserImplFlinkPython, UserImplPolarsPython, UserImplSparkScala, UserImplTFPython}
 import fuzzer.utils.io.ReadWriteUtils._
 import fuzzer.utils.json.JsonReader
 import fuzzer.utils.random.Random
@@ -60,6 +60,7 @@ object MainFuzzer {
             case "--rand-float-min" => config.copy(randFloatMin = value.toDouble)
             case "--rand-float-max" => config.copy(randFloatMax = value.toDouble)
             case "--logical-operator-set" => config.copy(logicalOperatorSet = value.split(",").map(_.trim).toSet)
+            case "--debug-mode" => config.copy(debugMode = value.toBoolean)
             case unknown => throw new IllegalArgumentException(s"Unknown argument: $unknown")
           }
           parseRec(tail, updated)
@@ -91,6 +92,7 @@ object MainFuzzer {
       case "flink-python" => FuzzerConfig.getFlinkPythonConfig
       case "dask-python" => FuzzerConfig.getDaskPythonConfig
       case "tensorflow-python" => FuzzerConfig.getTensorflowPythonConfig
+      case "polars-python" => FuzzerConfig.getPolarsPythonConfig
       case _ => throw new IllegalArgumentException(s"Unknown domain: $domain. Expected: spark-scala, flink-python, or dask-python")
     }
 
@@ -103,6 +105,7 @@ object MainFuzzer {
       case "flink-python" => UserImplFlinkPython.dag2FlinkPython(spec) _
       case "dask-python" => UserImplDaskPython.dag2DaskPython(spec) _
       case "tensorflow-python" => UserImplTFPython.dag2tensorflowPython(spec) _
+      case "polars-python" => UserImplPolarsPython.dag2polarsPython(spec) _
       case _ => throw new IllegalArgumentException("Required args not provided")
     }
     val engine = createEngineFromConfig(config, spec, dag2CodeFunc)

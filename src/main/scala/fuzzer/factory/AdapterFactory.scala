@@ -3,6 +3,7 @@ package fuzzer.factory
 import fuzzer.adapters.dask.{DaskCodeExecutor, DaskCodeGenerator, DaskDataAdapter}
 import fuzzer.adapters.spark.{SparkCodeExecutor, SparkCodeGenerator, SparkDataAdapter}
 import fuzzer.adapters.flink.{FlinkCodeExecutor, FlinkCodeGenerator, FlinkDataAdapter}
+import fuzzer.adapters.polars.{PolarsCodeExecutor, PolarsCodeGenerator, PolarsDataAdapter}
 import fuzzer.adapters.tensorflow.{TensorflowCodeExecutor, TensorflowCodeGenerator, TensorflowDataAdapter}
 import fuzzer.code.SourceCode
 import fuzzer.core.global.FuzzerConfig
@@ -39,6 +40,11 @@ object AdapterFactory {
         val codeExecutor = new TensorflowCodeExecutor(config, spec)
         (dataAdapter, codeGenerator, codeExecutor)
 
+      case "polars-python" =>
+        val dataAdapter = new PolarsDataAdapter(config)
+        val codeGenerator = new PolarsCodeGenerator(config, spec, dag2CodeFunc)
+        val codeExecutor = new PolarsCodeExecutor(config, spec)
+        (dataAdapter, codeGenerator, codeExecutor)
       case _ =>
         throw new IllegalArgumentException(s"Unsupported API: ${config.targetAPI}")
     }

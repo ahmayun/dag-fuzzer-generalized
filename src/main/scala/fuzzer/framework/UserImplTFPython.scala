@@ -432,7 +432,7 @@ object UserImplTFPython {
           case "tensor" | "scalar" =>
             // Generate initial state for reduce/scan
             paramName match {
-              case "initial_state" => "tf.constant(0)"
+              case "initial_state" => "tf.constant(0, dtype=tf.int64)"
               case _ => Random.nextInt(100).toString
             }
           case "str" | "string" => s"'${Random.alphanumeric.take(8).mkString}'"

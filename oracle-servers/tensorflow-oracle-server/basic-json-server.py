@@ -12,6 +12,8 @@ import os
 import glob
 import threading
 import pandas as pd
+from func_timeout import func_timeout, FunctionTimedOut
+
 
 class GlobalState:
     host = 'localhost'
@@ -25,6 +27,7 @@ class GlobalState:
     table_schemas = None
     # Store loaded dataframes
     tensorflow_namespace = None
+    timeout_seconds = 10
 
 
 GLOBAL_STATE = GlobalState()
@@ -144,7 +147,6 @@ class TensorflowFuzzingHandler(BaseHTTPRequestHandler):
             table_dataframes = self._load_all_tables(tables)
             namespace = self._build_namespace(table_dataframes)
             self._log_setup_success()
-            print("canary")
             return namespace
         except Exception as e:
             self._log_setup_failure(e)
@@ -305,9 +307,16 @@ class TensorflowFuzzingHandler(BaseHTTPRequestHandler):
 
     def _try_execute_code(self, code, namespace):
         """Attempt code execution and capture any errors"""
-        try:
+
+        def execute_code():
             exec(code, namespace, namespace)
+
+        try:
+            func_timeout(GLOBAL_STATE.timeout_seconds, execute_code)
             return {"success": True, "error_name": "", "error_message": ""}
+        except FunctionTimedOut:
+                return {"success": False, "error_name": "TimeoutError",
+                        "error_message": f"Code execution timed out after {GLOBAL_STATE.timeout_seconds} seconds"}
         except Exception as e:
             error_name = self.extract_error_name(e)
             error_msg = str(e)
@@ -586,7 +595,7 @@ class TensorflowFuzzingHandler(BaseHTTPRequestHandler):
 
         self.setup_logging_directory(GLOBAL_STATE.log_dir)
 
-        GLOBAL_STATE.table_schemas = self.load_tpcds_schema("pyflink-oracle-server/tpcds-schema.json")
+        GLOBAL_STATE.table_schemas = self.load_tpcds_schema("oracle-servers/tpcds-schema.json")
         # Initialize tensorflow environment once
         GLOBAL_STATE.tensorflow_namespace = self.setup_tensorflow_environment()
 

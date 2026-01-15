@@ -42,5 +42,4 @@ oracle-servers/polars-oracle-server/test.py
 oracle-servers/polars-oracle-server/test2.py
 oracle-servers/polars-oracle-server/test3.py
 oracle-servers/polars-oracle-server/test4-timeout-diagnosis.py
-requirements.txt
 udf-gen.py

@@ -16,6 +16,7 @@ import re
 import difflib
 import multiprocessing as mp
 import polars as pl
+from pathlib import Path
 
 def execute_in_process(code, result_queue, namespace):
     """Worker function that runs in subprocess"""
@@ -948,5 +949,6 @@ def main():
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
+    os.environ["LLVM_PROFILE_FILE"] = f"{Path.home()}/cov/profiles/polars-%p-%m.profraw"
     run_server()
 

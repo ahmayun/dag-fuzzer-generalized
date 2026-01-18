@@ -90,12 +90,14 @@ class RustCoverageMonitor:
 
         try:
             print(f"📊 Merging coverage → {out_file.name}")
+            merge_start = time.perf_counter()
             subprocess.run(cmd_str, shell=True, check=True)
+            merge_elapsed = time.perf_counter() - merge_start
 
             if out_file.exists():
                 size = out_file.stat().st_size
                 self.dump_count += 1
-                print(f"✅ Coverage snapshot created ({size:,} bytes)")
+                print(f"✅ Coverage snapshot created ({size:,} bytes) in {merge_elapsed:.2f}s")
                 return True
             else:
                 print("❌ profdata file was not created")

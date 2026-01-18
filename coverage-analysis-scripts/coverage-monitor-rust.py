@@ -72,32 +72,43 @@ class RustCoverageMonitor:
     def _merge_coverage(self):
         out_file = self._timestamped_profdata_path()
 
-        snapshot_dir = self._snapshot_profraw()
-        if snapshot_dir is None:
+        # Gather list of profraw files before merging
+        profraw_files = list(self.profraw_dir.glob("*.profraw"))
+        if not profraw_files:
+            print("⚠️  No .profraw files found to merge")
             return False
+
+        print(f"📊 Merging {len(profraw_files)} profraw files → {out_file.name}")
 
         cmd = [
             self.llvm_profdata,
             "merge",
             "-sparse",
-            str(snapshot_dir / "*.profraw"),
+            *[str(f) for f in profraw_files],
             "-o",
             str(out_file),
         ]
 
-        # Shell glob expansion needed
-        cmd_str = f'{self.llvm_profdata} merge -sparse {snapshot_dir}/*.profraw -o {out_file}'
-
         try:
-            print(f"📊 Merging coverage → {out_file.name}")
             merge_start = time.perf_counter()
-            subprocess.run(cmd_str, shell=True, check=True)
+            subprocess.run(cmd, check=True)
             merge_elapsed = time.perf_counter() - merge_start
 
             if out_file.exists():
                 size = out_file.stat().st_size
                 self.dump_count += 1
                 print(f"✅ Coverage snapshot created ({size:,} bytes) in {merge_elapsed:.2f}s")
+
+                # Delete the profraw files that were merged
+                deleted_count = 0
+                for f in profraw_files:
+                    try:
+                        f.unlink()
+                        deleted_count += 1
+                    except OSError as e:
+                        print(f"⚠️  Failed to delete {f.name}: {e}")
+                print(f"🗑️  Deleted {deleted_count} profraw files")
+
                 return True
             else:
                 print("❌ profdata file was not created")

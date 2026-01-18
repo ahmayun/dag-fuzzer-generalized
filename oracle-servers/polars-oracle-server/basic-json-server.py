@@ -22,13 +22,12 @@ def execute_in_process(code, result_queue, namespace):
     try:
         exec(code, namespace, namespace)
         result_queue.put(
-        {
-            "success": True,
-            "error_name": "",
-            "error_message": "",
-            "opt": {"plan": namespace["final_unopt_plan"]},
-            "unopt": {"plan":namespace["final_unopt_plan"]}
-        }
+            {
+                "success": True,
+                "error_name": "",
+                "error_message": "",
+                "plan": namespace["final_plan"]
+            }
         )
     except Exception as e:
         # Extract error name in the subprocess
@@ -343,8 +342,25 @@ class PolarsFuzzingHandler(BaseHTTPRequestHandler):
         return self._try_exec_code(code, namespace, code_type)
 
     def _try_execute_code_unopt(self, code, namespace, code_type):
-        """Attempt code execution and capture any errors"""
-        return self._try_exec_code(code, namespace, code_type)
+        # Match: final_plan = <something>.explain()
+        pattern = r"final_plan\s*=\s*(.+?)\.explain\(\s*\)"
+
+        match = re.search(pattern, code)
+        if not match:
+            # Nothing to rewrite
+            return self._try_exec_code(code, namespace, code_type)
+
+        var_expr = match.group(1)
+
+        replacement = (
+            "opt_flags = pl.QueryOptFlags()\n"
+            "opt_flags.no_optimizations()\n"
+            f"final_plan = {var_expr}.explain(optimizations=opt_flags)"
+        )
+
+        new_code = re.sub(pattern, replacement, code, count=1)
+
+        return self._try_exec_code(new_code, namespace, code_type)
 
     def _try_exec_code(self, code, namespace, code_type):
         ns_local = {}
@@ -468,53 +484,6 @@ class PolarsFuzzingHandler(BaseHTTPRequestHandler):
         end = start + 1 + (m.start() if m else len(plan) - (start + 1))
         return plan[start:end].strip()
 
-    def _extract_ast_lines(self, plan_string):
-        """Extract lines after '== Optimized Execution Plan ==' marker."""
-        if not plan_string:
-            return []
-
-        lines = plan_string.strip().split('\n')
-        ast_start_idx = self._find_ast_marker_index(lines)
-
-        if ast_start_idx is None:
-            return []
-
-        return [line.rstrip() for line in lines[ast_start_idx:] if line.strip()]
-
-    def _find_ast_marker_index(self, lines):
-        """Find the index after the AST marker line."""
-        for i, line in enumerate(lines):
-            if "== Optimized Execution Plan ==" in line:
-                return i + 1  # Start after the marker line
-        return None
-
-    def _are_plans_identical(self, opt_lines, unopt_lines):
-        """Check if two plan line lists are identical."""
-        return opt_lines == unopt_lines
-
-    def _generate_diff_output(self, opt_lines, unopt_lines):
-        """Generate and return unified diff as a list of strings."""
-
-        return list(difflib.unified_diff(
-            unopt_lines,
-            opt_lines,
-            fromfile='unoptimized_plan',
-            tofile='optimized_plan',
-            lineterm=''
-        ))
-
-
-    def _print_diff_results(self, is_same, diff_lines=None):
-        """Print the diff comparison results to console."""
-        print("\n=== DIFF RESULT ===")
-
-        if is_same:
-            print("Plans are identical!")
-        else:
-            print("Plans differ:")
-            if diff_lines:
-                print("\n".join(diff_lines))
-
     def _create_result_dict(self, same_plans, opt_plan, unopt_plan, opt_lines, unopt_lines, diff_lines=None):
         """Create the standardized result dictionary."""
         result_name = "Success" if same_plans else "MismatchException"
@@ -531,143 +500,24 @@ class PolarsFuzzingHandler(BaseHTTPRequestHandler):
 
     def count_udfs_in_plan(self, plan):
         """
-        Count the number of UDF calls in a Polars optimized query plan.
-
-        Args:
-            plan (str): The query plan string
-
-        Returns:
-            int: Number of UDF calls found in the plan
+        Count the number of Python UDF calls in a Polars query plan.
         """
         if not plan:
             return 0
 
-        udf_count = 0
+        # Count canonical Python UDF nodes
+        return len(re.findall(r"\.python_udf\s*\(", plan))
 
-        # Pattern to match Python UDF function references
-        # These typically appear as PythonScalarFunction, PythonTableFunction, etc.
-        python_function_pattern = r'\*org\.apache\.flink\.table\.functions\.python\.Python\w+Function[^*]*\*'
-
-        # Find all Python function references
-        python_functions = re.findall(python_function_pattern, plan)
-        udf_count += len(python_functions)
-
-        # Alternative pattern for other UDF representations that might appear
-        # Look for PythonCalc nodes which typically contain UDF calls
-        pythoncalc_pattern = r'PythonCalc\('
-        pythoncalc_matches = re.findall(pythoncalc_pattern, plan)
-
-        # If we found PythonCalc nodes but no Python function patterns,
-        # it might indicate UDFs in a different format
-        if len(pythoncalc_matches) > 0 and udf_count == 0:
-            # Count PythonCalc nodes as they typically represent UDF operations
-            udf_count = len(pythoncalc_matches)
-
-        # Look for other potential UDF patterns like custom function calls
-        # This catches cases where UDFs might be represented differently
-        custom_udf_pattern = r'(?:udf|UDF)\w*\('
-        custom_udfs = re.findall(custom_udf_pattern, plan, re.IGNORECASE)
-        udf_count += len(custom_udfs)
-
-        return udf_count
 
     def _diff_success_results(self, result_opt, result_unopt):
-#         df_diff = self._diff_dfs(result_opt, result_unopt)
-#         if df_diff['is_same'] == False:
-#             print("Returning df_diff")
-#             print(df_diff)
-#             print('-----')
-#             return df_diff
-#
-#         if df_diff['is_same'] == None:
-#             print("ERROR FAILED DF DIFF")
-
         return self._diff_udf_counts(result_opt, result_unopt)
-
-    def _diff_dfs(self, result_opt, result_unopt):
-
-        opt_df = result_opt['vars']['sink']
-        unopt_df = result_unopt['vars']['sink']
-
-        try:
-            # Convert DataFrames to Pandas for comparison
-            opt_pandas = opt_df.to_pandas()
-            unopt_pandas = unopt_df.to_pandas()
-
-            # Add row_id to preserve order
-            opt_pandas['row_id'] = range(len(opt_pandas))
-            unopt_pandas['row_id'] = range(len(unopt_pandas))
-
-            # Check if column names match
-            if set(opt_pandas.columns) != set(unopt_pandas.columns):
-                return {
-                    "is_same": False,
-                    "result_name": "MismatchException",
-                    "result_details": {
-                        "error": "Column mismatch",
-                        "opt_columns": list(opt_pandas.columns),
-                        "unopt_columns": list(unopt_pandas.columns),
-                        "missing_in_opt": list(set(unopt_pandas.columns) - set(opt_pandas.columns)),
-                        "missing_in_unopt": list(set(opt_pandas.columns) - set(unopt_pandas.columns))
-                    }
-                }
-
-            # Reorder columns to match
-            unopt_pandas = unopt_pandas[opt_pandas.columns]
-
-            # Perform set difference in both directions
-            opt_merged = opt_pandas.merge(unopt_pandas, indicator=True, how='outer')
-
-            # Rows only in opt_df
-            only_in_opt = opt_merged[opt_merged['_merge'] == 'left_only'].drop('_merge', axis=1)
-            # Rows only in unopt_df
-            only_in_unopt = opt_merged[opt_merged['_merge'] == 'right_only'].drop('_merge', axis=1)
-
-            # Check if both differences are empty
-            if only_in_opt.empty and only_in_unopt.empty:
-                return {
-                    "is_same": True,
-                    "result_name": "Success",
-                    "result_details": {
-                        "message": "DFs match",
-                        "row_count": len(opt_pandas),
-                        "column_count": len(opt_pandas.columns) - 1  # Exclude row_id
-                    }
-                }
-            else:
-                # Limit rows for readability
-                max_rows_to_show = 100
-
-                return {
-                    "is_same": False,
-                    "result_name": "MismatchException",
-                    "result_details": {
-                        "error": "Outputs don't match",
-                        "rows_only_in_opt": only_in_opt.head(max_rows_to_show).to_dict('records'),
-                        "rows_only_in_unopt": only_in_unopt.head(max_rows_to_show).to_dict('records'),
-                        "count_only_in_opt": len(only_in_opt),
-                        "count_only_in_unopt": len(only_in_unopt),
-                        "total_mismatches": len(only_in_opt) + len(only_in_unopt)
-                    }
-                }
-
-        except Exception as e:
-            return {
-                "is_same": None,
-                "result_name": "MismatchException",
-                "result_details": {
-                    "error": "Exception during comparison",
-                    "exception_type": type(e).__name__,
-                    "exception_message": str(e)
-                }
-            }
 
 
     def _diff_udf_counts(self, result_opt, result_unopt):
         """Compare stdout and stderr for two successful results."""
         # Extract output streams
-        opt_plan = result_opt["opt"]["plan"]
-        unopt_plan = result_unopt["opt"]["plan"]
+        opt_plan = result_opt["plan"]
+        unopt_plan = result_unopt["plan"]
 
         # Print plans
         print("=== OPTIMIZED PLAN ====")

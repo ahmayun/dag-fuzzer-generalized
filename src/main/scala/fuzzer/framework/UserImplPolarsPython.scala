@@ -1,13 +1,17 @@
 package fuzzer.framework
 
 import fuzzer.code.SourceCode
+import fuzzer.core.exceptions.DAGFuzzerException
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
 import fuzzer.data.types.DataType
 import fuzzer.utils.random.Random
 import play.api.libs.json._
 
+import scala.sys.process._
+import java.nio.file.{Files, Paths}
 import scala.collection.mutable
+import scala.io.Source
 
 object UserImplPolarsPython {
 
@@ -62,15 +66,8 @@ object UserImplPolarsPython {
       l += line
     }
 
-
-
-    l += s"final_opt_plan = $finalVariableName.explain()"
-    l += s"final_opt_df = $finalVariableName.collect()"
-
-    l += "opt_flags = pl.QueryOptFlags()"
-    l += "opt_flags.no_optimizations()"
-    l += s"final_unopt_plan = $finalVariableName.explain(optimizations=opt_flags)"
-    l += s"final_unopt_df = $finalVariableName.collect(optimizations=opt_flags)"
+    l += s"final_plan = $finalVariableName.explain()"
+//    l += s"final_df = $finalVariableName.collect()"
 
 //    val withDebugLines = l.zip(l.indices.map(i => s"print($i)")).flatMap(e => Array(e._1, e._2))
 //    val code = withDebugLines.mkString("\n")
@@ -89,244 +86,109 @@ object UserImplPolarsPython {
   // ============================================================================
 
   def generatePreloadedUDF(): String = {
-    // TODO: Generate via LLM
-    s"""
-       |def selectUdfSingleCol(x):
-       |    # Example transformation
-       |    return x * 2 if isinstance(x, (int, float)) else x
+    val config = fuzzer.core.global.State.config.get
 
-       |""".stripMargin
+    val pythonScriptPath: String = "llm-caller/generator.py"
+    val numTries: Int = 3
+    val langName: String = "Python"
+    val batch = (fuzzer.core.global.State.iteration / config.refreshUdfsAfter).toInt
+    val outDir = s"generated/$langName"
+    val outPath = s"$outDir/udfs_$batch.json"
+    val prompt = s"""
+Generate a json file of the following format
+```
+{ "functions": ["def selectUdfSingleCol(x): ..."] }
+```
+The functions array should contain ${config.numUdfsPerLLMCall} Python functions. Each function should be short and simple that does something arbitrary.
+Each function should be:
+- Named "selectUdfSingleCol"
+- Complete and runnable
+- Contain only code (no comments or docstrings)
+- Take a single argument that can be any primitive type
+- Should be between 1-10 lines of code
+""".trim
+
+    val udfList =
+      if (!Files.exists(Paths.get(outPath)) ||
+        (fuzzer.core.global.State.iteration % config.refreshUdfsAfter) == 0) {
+
+        var lastException: Throwable = null
+        var attempt = 0
+        var success = false
+
+        while (attempt < numTries && !success) {
+          try {
+            generatePreloadedUDF(
+              pythonScriptPath,
+              prompt,
+              outDir,
+              outPath
+            )
+            success = true
+          } catch {
+            case e: Throwable =>
+              lastException = e
+              attempt += 1
+          }
+        }
+
+        if (!success) {
+          val outPathObj = Paths.get(outPath)
+          if (Files.exists(outPathObj)) {
+            Files.delete(outPathObj)
+          }
+
+          val previousBatchOpt =
+            (0 until batch).reverse
+              .map(b => s"$outDir/udfs_$b.json")
+              .find(p => Files.exists(Paths.get(p)))
+
+          previousBatchOpt match {
+            case Some(prevPath) =>
+              readFunctionsFromJson(prevPath)
+
+            case None =>
+              throw new DAGFuzzerException(
+                s"UDF Generation failed after $numTries tries and no previous batch exists",
+                lastException
+              )
+          }
+        } else {
+          readFunctionsFromJson(outPath)
+        }
+
+      } else {
+        readFunctionsFromJson(outPath)
+      }
+
+    Random.choice(udfList)
   }
 
-  def generateAggregationFunction(): String = {
-    Random.choice(
-      List(
-        """
-          |def preloaded_aggregation(values: pd.Series) -> int:
-          |    return len(values)
-          |""".stripMargin,
 
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.sum()
-          |""".stripMargin,
+  def generatePreloadedUDF(pythonScriptPath: String, prompt: String, outDir: String, outPath: String): List[String] = {
+    Files.createDirectories(Paths.get(outDir))
 
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.mean()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.min()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.max()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.std()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.var()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.median()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.iloc[0] if len(values) > 0 else None
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.iloc[-1] if len(values) > 0 else None
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> int:
-          |    return values.nunique()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> int:
-          |    return values.count()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.skew()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.kurtosis()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.quantile(0.25)
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.quantile(0.75)
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.max() - values.min()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return values.product()
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    import numpy as np
-          |    return np.exp(np.log(values[values > 0]).mean()) if (values > 0).all() else None
-          |""".stripMargin,
-
-        """
-          |def preloaded_aggregation(values: pd.Series) -> float:
-          |    return len(values) / (1.0 / values).sum() if (values != 0).all() else None
-          |""".stripMargin
-      )
-    )
-  }
-
-  def generateStringFilterUDF(): String = {
-    // String Filter UDFs
-    val stringFilters = List(
-      """
-        |def filter_udf_string(arg):
-        |    return len(arg) > 5
-        |""".stripMargin,
-
-      """
-        |def filter_udf_string(arg):
-        |    return arg.startswith('A') or arg.startswith('a')
-        |""".stripMargin,
-
-      """
-        |def filter_udf_string(arg):
-        |    return 'test' in arg.lower()
-        |""".stripMargin,
-
-      """
-        |def filter_udf_string(arg):
-        |    return arg.isalpha() and len(arg) < 10
-        |""".stripMargin,
-
-      """
-        |def filter_udf_string(arg):
-        |    return arg.count('e') >= 2
-        |""".stripMargin
-    )
-    Random.choice(stringFilters)
-  }
-
-  def generateIntFilterUDF(): String = {
-
-    // Integer Filter UDFs
-    val intFilters = List(
-      """
-        |def filter_udf_integer(arg):
-        |    return arg > 0 and arg % 2 == 0
-        |""".stripMargin,
-
-      """
-        |def filter_udf_integer(arg):
-        |    return arg >= 10 and arg <= 100
-        |""".stripMargin,
-
-      """
-        |def filter_udf_integer(arg):
-        |    return arg % 3 == 0 or arg % 5 == 0
-        |""".stripMargin,
-
-      """
-        |def filter_udf_integer(arg):
-        |    return str(arg)[::-1] == str(arg)
-        |""".stripMargin,
-
-      """
-        |def filter_udf_integer(arg):
-        |    return arg > 0 and (arg & (arg - 1)) == 0
-        |""".stripMargin
+    val cmd = Seq(
+      "oracle-servers/venv/bin/python",
+      pythonScriptPath,
+      "--prompt", prompt,
+      "--out", outPath
     )
 
-    Random.choice(intFilters)
+    cmd.!
+
+    readFunctionsFromJson(outPath)
   }
 
-  def generateDecimalFilterUDF(): String = {
-    // Decimal Filter UDFs
-    val decimalFilters = List(
-      """
-        |def filter_udf_decimal(arg):
-        |    return arg > 0.0 and arg < 1000.0
-        |""".stripMargin,
-
-      """
-        |def filter_udf_decimal(arg):
-        |    return round(arg, 2) == arg
-        |""".stripMargin,
-
-      """
-        |def filter_udf_decimal(arg):
-        |    return arg >= 50.5 and int(arg) % 10 == 5
-        |""".stripMargin,
-
-      """
-        |def filter_udf_decimal(arg):
-        |    return arg * 100 % 25 == 0
-        |""".stripMargin,
-
-      """
-        |def filter_udf_decimal(arg):
-        |    return abs(arg - round(arg)) > 0.1
-        |""".stripMargin
-    )
-
-    Random.choice(decimalFilters)
-  }
-
-  def generateComplexFilterUDF(): String = {
-    """
-      |class MyObject:
-      |    def __init__(self, name, value):
-      |        self.name = name
-      |        self.value = value
-      |
-      |# UDF that returns the custom object
-      |@udf(result_type=DataTypes.ROW([
-      |    DataTypes.FIELD("name", DataTypes.STRING()),
-      |    DataTypes.FIELD("value", DataTypes.INT())
-      |]))
-      |def preloaded_udf_complex(*input_val):
-      |    obj = MyObject("test", hash(input_val[0]))
-      |    return (obj.name, obj.value)  # Return as tuple
-      |""".stripMargin
-  }
-
-  def generateTableFunction(): String = {
-    """
-      |@udtf(result_types=[DataTypes.STRING()])
-      |def preloaded_udtf(str_arg):
-      |    if str_arg:
-      |        for v in str_arg.split(','):
-      |            yield v.strip(),
-      |""".stripMargin
+  def readFunctionsFromJson(path: String): List[String] = {
+    val source = Source.fromFile(path)
+    try {
+      val jsonStr = source.mkString
+      val json = Json.parse(jsonStr)
+      (json \ "functions").as[List[String]]
+    } finally {
+      source.close()
+    }
   }
 
   // ============================================================================
@@ -633,7 +495,6 @@ object UserImplPolarsPython {
 
   def generatePolarsExpression(node: Node[DFOperator], col: ColumnMetadata): String = {
     val colName = col.name
-    val config = fuzzer.core.global.State.config.get
 
     col.dataType match {
       case fuzzer.data.types.IntegerType | fuzzer.data.types.LongType =>

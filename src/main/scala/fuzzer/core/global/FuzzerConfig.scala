@@ -27,7 +27,9 @@ case class FuzzerConfig(
                          logicalOperatorSet: Set[String],
                          replay: Boolean,
                          artifactsDir: String,
-                         debugMode: Boolean
+                         debugMode: Boolean,
+                         numUdfsPerLLMCall: Int,
+                         refreshUdfsAfter: Int
                        )
 
 object FuzzerConfig {
@@ -38,6 +40,7 @@ object FuzzerConfig {
 //    conf
 //  }
 
+  val numUdfs: Int = 3
 
   def getSparkScalaConfig: FuzzerConfig = {
     FuzzerConfig(
@@ -67,7 +70,9 @@ object FuzzerConfig {
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
       artifactsDir = null,
-      debugMode = false
+      debugMode = false,
+      numUdfsPerLLMCall = 10,
+      refreshUdfsAfter = 10000
     )
   }
 
@@ -99,7 +104,9 @@ object FuzzerConfig {
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
       artifactsDir = null,
-      debugMode = false
+      debugMode = false,
+      numUdfsPerLLMCall = 10,
+      refreshUdfsAfter = 10000
     )
   }
 
@@ -131,7 +138,9 @@ object FuzzerConfig {
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
       artifactsDir = null,
-      debugMode = false
+      debugMode = false,
+      numUdfsPerLLMCall = 10,
+      refreshUdfsAfter = 10000
     )
   }
 
@@ -163,7 +172,9 @@ object FuzzerConfig {
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
       artifactsDir = null,
-      debugMode = false
+      debugMode = false,
+      numUdfsPerLLMCall = 10,
+      refreshUdfsAfter = 10000
     )
   }
 
@@ -195,7 +206,9 @@ object FuzzerConfig {
       logicalOperatorSet = Set(">", "<", ">=", "<="),
       replay = false,
       artifactsDir = null,
-      debugMode = false
+      debugMode = false,
+      numUdfsPerLLMCall = 10,
+      refreshUdfsAfter = 50
     )
   }
 }

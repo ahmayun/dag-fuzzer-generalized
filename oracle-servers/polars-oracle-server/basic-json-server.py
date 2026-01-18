@@ -919,7 +919,7 @@ def run_server(port: int = 8890):
         httpd.shutdown()
 
 def setup_coverage_profiling():
-    profile_dir = Path.home() / "cov/profiles"
+    profile_dir = Path.root() / "var/cov/profiles"
 
     # Create directory if it doesn't exist
     profile_dir.mkdir(parents=True, exist_ok=True)

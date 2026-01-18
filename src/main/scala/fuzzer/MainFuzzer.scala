@@ -61,6 +61,8 @@ object MainFuzzer {
             case "--rand-float-max" => config.copy(randFloatMax = value.toDouble)
             case "--logical-operator-set" => config.copy(logicalOperatorSet = value.split(",").map(_.trim).toSet)
             case "--debug-mode" => config.copy(debugMode = value.toBoolean)
+            case "--num-udfs-per-llm-call" => config.copy(numUdfsPerLLMCall = value.toInt)
+            case "--refresh-udfs-after" => config.copy(refreshUdfsAfter = value.toInt)
             case unknown => throw new IllegalArgumentException(s"Unknown argument: $unknown")
           }
           parseRec(tail, updated)

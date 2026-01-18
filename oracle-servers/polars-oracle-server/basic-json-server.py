@@ -17,6 +17,7 @@ import difflib
 import multiprocessing as mp
 import polars as pl
 from pathlib import Path
+import shutil
 
 def execute_in_process(code, result_queue, namespace):
     """Worker function that runs in subprocess"""
@@ -917,39 +918,25 @@ def run_server(port: int = 8890):
         print("\nShutting down server...")
         httpd.shutdown()
 
+def setup_coverage_profiling():
+    profile_dir = Path.home() / "cov/profiles"
 
-def main():
-    o = PolarsFuzzingHandler()
+    # Create directory if it doesn't exist
+    profile_dir.mkdir(parents=True, exist_ok=True)
 
-    result_opt = {
-        "stdout": """
-    == Optimized Execution Plan ==
-    LogicalProject(d_qoy=[$1])
-    +- LogicalAggregate(group=[{4}], EXPR$0=[COUNT($10)])
-       +- LogicalFilter(condition=[>=($8, 16)])
-          +- LogicalTableScan(table=[[default_catalog, default_database, date_dim]])
-    """,
-        "stderr": "No errors detected.\n"
-    }
+    # Remove existing files (if any)
+    if profile_dir.exists():
+        for f in profile_dir.iterdir():
+            if f.is_file():
+                f.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(f, ignore_errors=True)
 
-    # Example unoptimized result (with different plan structure)
-    result_unopt = {
-        "stdout": """
-    == Optimized Execution Plan ==
-    LogicalProject(d_qoy=[$1])
-    +- LogicalAggregate(group=[{4}], EXPR$0=[COUNT($10)])
-       +- LogicalSort(fetch=[53])
-          +- LogicalFilter(condition=[>=($8, 16)])
-             +- LogicalTableScan(table=[[default_catalog, default_database, date_dim]])
-    """,
-        "stderr": "Warning: Query not optimized.\n"
-    }
-    d = o._diff_success_results(result_opt, result_unopt)
-    print(json.dumps(d, indent=2))
+    # Set environment variable
+    os.environ["LLVM_PROFILE_FILE"] = f"{profile_dir}/polars-%p-%m.profraw"
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
-    os.environ["LLVM_PROFILE_FILE"] = f"{Path.home()}/cov/profiles/polars-%p-%m.profraw"
-    [f.unlink() for f in (Path.home() / "cov/profiles").iterdir()]
+    setup_coverage_profiling()
     run_server()
 

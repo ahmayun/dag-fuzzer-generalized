@@ -950,5 +950,6 @@ def main():
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
     os.environ["LLVM_PROFILE_FILE"] = f"{Path.home()}/cov/profiles/polars-%p-%m.profraw"
+    [f.unlink() for f in (Path.home() / "cov/profiles").iterdir()]
     run_server()
 

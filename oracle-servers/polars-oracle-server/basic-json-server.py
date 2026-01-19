@@ -933,7 +933,7 @@ def setup_coverage_profiling():
                 shutil.rmtree(f, ignore_errors=True)
 
     # Set environment variable
-    os.environ["LLVM_PROFILE_FILE"] = f"{profile_dir}/polars-%p-%m.profraw"
+    os.environ["LLVM_PROFILE_FILE"] = f"{profile_dir}/polars-%p-%3m.profraw"
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)

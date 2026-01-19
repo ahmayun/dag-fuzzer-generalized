@@ -708,6 +708,7 @@ class PolarsFuzzingHandler(BaseHTTPRequestHandler):
             execution_result = self._execute_and_process(program_number, code, code_type)
             self._log_execution_results(program_number, execution_result)
 
+            print(f"[COVERAGE] About to merge and clean")
             # Coverage
             GLOBAL_STATE.coverage_merger.merge_and_cleanup()
 
@@ -1025,6 +1026,7 @@ def setup_coverage_profiling(args):
     os.environ["LLVM_PROFILE_FILE"] = f"{profile_dir}/polars-%p-%m.profraw"
 
     GLOBAL_STATE.coverage_merger = RustCoverageMerger(profile_dir, get_llvm_profdata_path(), get_coverage_out_dir_path(args.out_dir))
+    print(f"[COVERAGE] MERGER INITIALIZED: {GLOBAL_STATE.coverage_merger}")
 
 def get_llvm_profdata_path():
     rustc_path = os.path.expanduser('~/.cargo/bin/rustc')

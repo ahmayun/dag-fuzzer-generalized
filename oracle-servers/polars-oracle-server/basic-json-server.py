@@ -39,6 +39,7 @@ class RustCoverageMerger:
         """Merge all .profraw files into a timestamped .profdata file."""
         profraw_files = list(self.profraw_dir.glob("*.profraw"))
         if not profraw_files:
+            print("[coverage] No .profraw files found to merge")
             return None
 
         out_file = self._timestamped_profdata_path()
@@ -52,10 +53,26 @@ class RustCoverageMerger:
             str(out_file),
         ]
 
+        print(f"[coverage] Merging {len(profraw_files)} profraw files")
+        print(f"[coverage] Command: {' '.join(cmd)}")
+
         try:
-            subprocess.run(cmd, check=True)
-            return out_file if out_file.exists() else None
-        except subprocess.CalledProcessError:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            if result.stderr:
+                print(f"[coverage] stderr: {result.stderr}")
+            if out_file.exists():
+                size = out_file.stat().st_size
+                print(f"[coverage] Created {out_file} ({size:,} bytes)")
+                return out_file
+            else:
+                print(f"[coverage] Output file not created: {out_file}")
+                return None
+        except subprocess.CalledProcessError as e:
+            print(f"[coverage] Merge failed with exit code {e.returncode}")
+            if e.stdout:
+                print(f"[coverage] stdout: {e.stdout}")
+            if e.stderr:
+                print(f"[coverage] stderr: {e.stderr}")
             return None
 
     def merge_and_cleanup(self):
@@ -68,13 +85,18 @@ class RustCoverageMerger:
         if not out_file:
             return None
 
+        deleted = 0
         for f in profraw_files:
             try:
                 f.unlink()
-            except OSError:
-                pass
+                deleted += 1
+            except OSError as e:
+                print(f"[coverage] Failed to delete {f}: {e}")
 
+        print(f"[coverage] Cleaned up {deleted} profraw files")
         return out_file
+
+
 # =====================================================
 def execute_in_process(code, result_queue, namespace):
     """Worker function that runs in subprocess"""

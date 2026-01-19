@@ -18,7 +18,64 @@ import multiprocessing as mp
 import polars as pl
 from pathlib import Path
 import shutil
+import subprocess
+import argparse
 
+# ================ COVERAGE ====================
+
+class RustCoverageMerger:
+    def __init__(self, profraw_dir, llvm_profdata, output_dir):
+        self.profraw_dir = Path(profraw_dir)
+        self.output_dir = Path(output_dir)
+        self.llvm_profdata = llvm_profdata
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _timestamped_profdata_path(self):
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return self.output_dir / f"coverage_{ts}.profdata"
+
+    def merge_coverage(self):
+        """Merge all .profraw files into a timestamped .profdata file."""
+        profraw_files = list(self.profraw_dir.glob("*.profraw"))
+        if not profraw_files:
+            return None
+
+        out_file = self._timestamped_profdata_path()
+
+        cmd = [
+            self.llvm_profdata,
+            "merge",
+            "-sparse",
+            *[str(f) for f in profraw_files],
+            "-o",
+            str(out_file),
+        ]
+
+        try:
+            subprocess.run(cmd, check=True)
+            return out_file if out_file.exists() else None
+        except subprocess.CalledProcessError:
+            return None
+
+    def merge_and_cleanup(self):
+        """Merge coverage and delete the source profraw files."""
+        profraw_files = list(self.profraw_dir.glob("*.profraw"))
+        if not profraw_files:
+            return None
+
+        out_file = self.merge_coverage()
+        if not out_file:
+            return None
+
+        for f in profraw_files:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+        return out_file
+# =====================================================
 def execute_in_process(code, result_queue, namespace):
     """Worker function that runs in subprocess"""
     try:
@@ -51,6 +108,8 @@ class GlobalState:
     polars_namespace = None
 
     timeout_seconds = 3
+    coverage_profraw_dir = "/var/cov/profiles/live"
+    coverage_merger = None
 
 
 GLOBAL_STATE = GlobalState()
@@ -627,6 +686,9 @@ class PolarsFuzzingHandler(BaseHTTPRequestHandler):
             execution_result = self._execute_and_process(program_number, code, code_type)
             self._log_execution_results(program_number, execution_result)
 
+            # Coverage
+            GLOBAL_STATE.coverage_merger.merge_and_cleanup()
+
             return execution_result
         except Exception as e:
             import traceback
@@ -918,8 +980,13 @@ def run_server(port: int = 8890):
         print("\nShutting down server...")
         httpd.shutdown()
 
-def setup_coverage_profiling():
-    profile_dir = Path("/var/cov/profiles/live")
+def get_coverage_out_dir_path(out_dir):
+    coverage_path = Path(out_dir).parent / "coverage"
+    coverage_path.mkdir(parents=True, exist_ok=True)
+    return str(coverage_path)
+
+def setup_coverage_profiling(args):
+    profile_dir = Path(GLOBAL_STATE.coverage_profraw_dir)
 
     # Create directory if it doesn't exist
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -935,8 +1002,27 @@ def setup_coverage_profiling():
     # Set environment variable
     os.environ["LLVM_PROFILE_FILE"] = f"{profile_dir}/polars-%p-%m.profraw"
 
+    GLOBAL_STATE.coverage_merger = RustCoverageMerger(profile_dir, get_llvm_profdata_path(), get_coverage_out_dir_path(args.out_dir))
+
+def get_llvm_profdata_path():
+    rustc_path = os.path.expanduser('~/.cargo/bin/rustc')
+    target_libdir = subprocess.check_output([rustc_path, '--print', 'target-libdir'], text=True).strip()
+    return os.path.join(os.path.dirname(target_libdir), 'bin', 'llvm-profdata')
+
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="Oracle server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        '--out-dir', '-d',
+        type=str,
+        default='/tmp/coverage',
+        help='Directory containing profdata coverage files'
+    )
+    args = parser.parse_args()
+
     mp.set_start_method('spawn', force=True)
-    setup_coverage_profiling()
+    setup_coverage_profiling(args)
     run_server()
 

@@ -10,7 +10,7 @@ import fuzzer.templates.Harness
 import fuzzer.utils.spark.tpcds.TPCDSTablesLoader
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.catalyst.rules.Rule.coverage
+//import org.apache.spark.sql.catalyst.rules.Rule.coverage
 import org.apache.spark.sql.functions.{lit, row_number}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import play.api.libs.json.JsValue
@@ -258,7 +258,7 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
         success = success,
         exception = result,
         combinedSourceWithResults = combinedSourceWithResults,
-        coverage = coverage.clone(),
+//        coverage = coverage.clone(),
       )
     } catch {
       case ex: Throwable =>

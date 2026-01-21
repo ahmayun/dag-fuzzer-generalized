@@ -451,18 +451,71 @@ def find_profdata_files(input_dir: Path) -> List[Path]:
     return valid
 
 
+def select_datapoints(
+    sorted_inputs: List[Path],
+    num_points: Optional[int],
+) -> List[int]:
+    """
+    Select indices from sorted_inputs to create evenly-spaced data points.
+
+    If num_points is None, compute default as 2 points per hour based on time span.
+    Returns list of indices into sorted_inputs.
+    """
+    if len(sorted_inputs) == 0:
+        return []
+
+    if len(sorted_inputs) == 1:
+        return [0]
+
+    # Parse timestamps
+    timestamps = [parse_snapshot_timestamp(p) for p in sorted_inputs]
+    first_ts = timestamps[0]
+    last_ts = timestamps[-1]
+    time_span = (last_ts - first_ts).total_seconds()
+
+    # Calculate default num_points if not specified (2 per hour)
+    if num_points is None:
+        hours = time_span / 3600.0
+        num_points = max(2, int(hours * 2))  # At least 2 points
+
+    # If we have fewer files than requested points, use all files
+    if len(sorted_inputs) <= num_points:
+        return list(range(len(sorted_inputs)))
+
+    # Select evenly-spaced indices
+    # Always include first (0) and last (len-1)
+    indices = [0]
+
+    if num_points > 2:
+        # Distribute remaining points evenly in between
+        step = (len(sorted_inputs) - 1) / (num_points - 1)
+        for i in range(1, num_points - 1):
+            idx = int(round(i * step))
+            indices.append(idx)
+
+    # Always include the last index
+    if len(sorted_inputs) - 1 not in indices:
+        indices.append(len(sorted_inputs) - 1)
+
+    return sorted(set(indices))
+
+
 def create_cumulative_profdata_files(
     input_profdatas: List[Path],
     output_dir: Path,
     llvm_profdata: str,
+    num_datapoints: Optional[int],
 ) -> List[Path]:
     """
     Create cumulative profdata files where each snapshot is merged with all previous ones.
 
-    For example, if input files are [t1.profdata, t2.profdata, t3.profdata]:
-    - cumulative_t1.profdata = t1.profdata
-    - cumulative_t2.profdata = merge(t1.profdata, t2.profdata)
-    - cumulative_t3.profdata = merge(t1.profdata, t2.profdata, t3.profdata)
+    Only creates cumulative files for selected data points (evenly spaced in time).
+
+    For example, if input files are [t1, t2, ..., t100] and num_datapoints=3:
+    - Select indices [0, 50, 99] (approximately)
+    - cumulative_t1.profdata = merge(t1)
+    - cumulative_t50.profdata = merge(t1, t2, ..., t50)
+    - cumulative_t100.profdata = merge(t1, t2, ..., t100)
 
     Returns list of cumulative profdata files.
     """
@@ -472,12 +525,30 @@ def create_cumulative_profdata_files(
     # Sort input files by timestamp to ensure correct ordering
     sorted_inputs = sorted(input_profdatas, key=lambda p: parse_snapshot_timestamp(p))
 
+    # Select which data points to process
+    selected_indices = select_datapoints(sorted_inputs, num_datapoints)
+
     print("\n🔄 Creating cumulative profdata files...")
     print("=" * 70)
 
-    for i, prof in enumerate(sorted_inputs, start=1):
-        # Files to merge: all files from start up to and including current
-        files_to_merge = sorted_inputs[:i]
+    if num_datapoints is None:
+        # Calculate what the default would be
+        timestamps = [parse_snapshot_timestamp(p) for p in sorted_inputs]
+        time_span_hours = (timestamps[-1] - timestamps[0]).total_seconds() / 3600.0
+        default_points = max(2, int(time_span_hours * 2))
+        print(f"📊 Time span: {time_span_hours:.2f} hours")
+        print(f"📊 Selected {len(selected_indices)} data points (default: 2 per hour)")
+    else:
+        print(f"📊 Selected {len(selected_indices)} data points (requested: {num_datapoints})")
+
+    print(f"📊 Total input files: {len(sorted_inputs)}")
+    print()
+
+    for i, idx in enumerate(selected_indices, start=1):
+        prof = sorted_inputs[idx]
+
+        # Files to merge: all files from start up to and including this one
+        files_to_merge = sorted_inputs[:idx + 1]
 
         # Output filename maintains the timestamp of the latest file
         output_name = f"cumulative_{prof.name}"
@@ -491,7 +562,7 @@ def create_cumulative_profdata_files(
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             cumulative_files.append(output_path)
-            print(f"✅ [{i}/{len(sorted_inputs)}] {output_name} (merged {i} file{'s' if i > 1 else ''})")
+            print(f"✅ [{i}/{len(selected_indices)}] {output_name} (merged {idx + 1} file{'s' if idx + 1 > 1 else ''})")
         except subprocess.CalledProcessError as e:
             msg = e.stderr.strip() if e.stderr else str(e)
             raise RuntimeError(f"llvm-profdata merge failed for {output_name}: {msg}") from e
@@ -529,6 +600,9 @@ def main() -> None:
                         help="Disable interpolation; plot only actual snapshot points connected by lines.")
     parser.add_argument("--interpolate-step-sec", type=float, default=30.0,
                         help="Interpolation step in seconds for elapsed-time axis (default: 30s).")
+
+    parser.add_argument("--data-points", required=False, type=int, default=None,
+                        help="Number of evenly-spaced data points to generate. Default: 2 points per hour based on time span.")
 
 
     args = parser.parse_args()
@@ -579,6 +653,7 @@ def main() -> None:
         input_profdatas=profdatas,
         output_dir=cumulative_dir,
         llvm_profdata=llvm_profdata,
+        num_datapoints=args.data_points,
     )
 
     # Step 2: Process cumulative snapshots

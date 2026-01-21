@@ -63,6 +63,8 @@ object MainFuzzer {
             case "--debug-mode" => config.copy(debugMode = value.toBoolean)
             case "--num-udfs-per-llm-call" => config.copy(numUdfsPerLLMCall = value.toInt)
             case "--refresh-udfs-after" => config.copy(refreshUdfsAfter = value.toInt)
+            case "--no-coverage-capture" => config.copy(coverageCaptureOn = false)
+            case "--coverage-capture" => config.copy(coverageCaptureOn = true)
             case unknown => throw new IllegalArgumentException(s"Unknown argument: $unknown")
           }
           parseRec(tail, updated)

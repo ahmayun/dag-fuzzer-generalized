@@ -287,8 +287,9 @@ class PolarsCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecut
     val processBuilder = new java.lang.ProcessBuilder(
       "oracle-servers/venv/bin/python",
       "oracle-servers/polars-oracle-server/basic-json-server.py",
-      "--out-dir",
-      config.outDir
+      "--out-dir", config.outDir,
+      s"--${if(config.coverageCaptureOn) "" else "no-"}coverage-capture",
+
     )
     processBuilder.redirectOutput(new File("oracle-servers/.logs/polars-server.log"))
     processBuilder.redirectErrorStream(true)

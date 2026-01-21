@@ -29,7 +29,8 @@ case class FuzzerConfig(
                          artifactsDir: String,
                          debugMode: Boolean,
                          numUdfsPerLLMCall: Int,
-                         refreshUdfsAfter: Int
+                         refreshUdfsAfter: Int,
+                         coverageCaptureOn: Boolean,
                        )
 
 object FuzzerConfig {
@@ -72,7 +73,8 @@ object FuzzerConfig {
       artifactsDir = null,
       debugMode = false,
       numUdfsPerLLMCall = 10,
-      refreshUdfsAfter = 10000
+      refreshUdfsAfter = 10000,
+      coverageCaptureOn = true,
     )
   }
 
@@ -106,7 +108,8 @@ object FuzzerConfig {
       artifactsDir = null,
       debugMode = false,
       numUdfsPerLLMCall = 10,
-      refreshUdfsAfter = 10000
+      refreshUdfsAfter = 10000,
+      coverageCaptureOn = true,
     )
   }
 
@@ -140,7 +143,8 @@ object FuzzerConfig {
       artifactsDir = null,
       debugMode = false,
       numUdfsPerLLMCall = 10,
-      refreshUdfsAfter = 10000
+      refreshUdfsAfter = 10000,
+      coverageCaptureOn = true,
     )
   }
 
@@ -174,7 +178,8 @@ object FuzzerConfig {
       artifactsDir = null,
       debugMode = false,
       numUdfsPerLLMCall = 10,
-      refreshUdfsAfter = 10000
+      refreshUdfsAfter = 10000,
+      coverageCaptureOn = true,
     )
   }
 
@@ -187,7 +192,7 @@ object FuzzerConfig {
       N = 140,
       d = 200,
       p = 5,
-      outDir = "./target/dagfuzz-out/polars-python",
+      outDir = "./target/dagfuzz-out/polars-python/artifacts",
       outExt = ".py",
       timeLimitSec = 10,
       dagGenDir = "dag-gen/DAGs/DAGs",
@@ -208,7 +213,8 @@ object FuzzerConfig {
       artifactsDir = null,
       debugMode = false,
       numUdfsPerLLMCall = 10,
-      refreshUdfsAfter = 50
+      refreshUdfsAfter = 50,
+      coverageCaptureOn = true,
     )
   }
 }

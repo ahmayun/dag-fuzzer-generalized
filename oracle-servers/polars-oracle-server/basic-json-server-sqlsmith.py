@@ -404,10 +404,137 @@ class PolarsFuzzingHandler(BaseHTTPRequestHandler):
             'error_name': '',
             'final_program': ""
         }
+    import polars as pl
+
+    TPCDS_TABLES = [
+        "call_center",
+        "catalog_page",
+        "catalog_returns",
+        "catalog_sales",
+        "customer",
+        "customer_address",
+        "customer_demographics",
+        "date_dim",
+        "household_demographics",
+        "income_band",
+        "inventory",
+        "item",
+        "promotion",
+        "reason",
+        "ship_mode",
+        "store",
+        "store_returns",
+        "store_sales",
+        "time_dim",
+        "warehouse",
+        "web_page",
+        "web_returns",
+        "web_sales",
+        "web_site",
+    ]
+
+
+    def wrap_sql_query(self, query: str) -> str:
+        """
+        Wraps a SQL query to make it runnable with Polars SQL context.
+
+        This function:
+        1. Adds polars import
+        2. Detects which TPC-DS tables are referenced in the query
+        3. Lazily loads those tables from parquet files
+        4. Registers them with a SQLContext
+        5. Executes the query and captures the explain plan
+        6. Resets the context by unregistering all tables
+
+        Args:
+            query: A SQL query string that references TPC-DS tables
+
+        Returns:
+            A string containing executable Python code
+        """
+
+        TPCDS_TABLES = [
+            "call_center",
+            "catalog_page",
+            "catalog_returns",
+            "catalog_sales",
+            "customer",
+            "customer_address",
+            "customer_demographics",
+            "date_dim",
+            "household_demographics",
+            "income_band",
+            "inventory",
+            "item",
+            "promotion",
+            "reason",
+            "ship_mode",
+            "store",
+            "store_returns",
+            "store_sales",
+            "time_dim",
+            "warehouse",
+            "web_page",
+            "web_returns",
+            "web_sales",
+            "web_site",
+        ]
+
+        query = re.sub(r'\bmain\.', '', query, flags=re.IGNORECASE)
+
+        # Find which tables are used in the query
+        query_lower = query.lower()
+        used_tables = []
+        for table in TPCDS_TABLES:
+            # Check for table name with word boundaries to avoid partial matches
+            # e.g., "item" shouldn't match "item_id"
+            # Look for table preceded by whitespace, comma, or opening paren
+            # and followed by whitespace, comma, closing paren, or end
+            pattern = rf'(?:^|[\s,(\"])({re.escape(table)})(?:[\s,)\"\.]|$)'
+            if re.search(pattern, query_lower):
+                used_tables.append(table)
+
+        # Build the code string
+        lines = [
+            "import polars as pl",
+            "",
+            "# Create SQL context",
+            "ctx = pl.SQLContext()",
+            "",
+            "# Load and register required tables",
+        ]
+
+        # Add lazy loading and registration for each used table
+        for table in used_tables:
+            lines.append(f'{table} = pl.scan_parquet("tpcds-data-5pc/{table}/*.parquet")')
+            lines.append(f'ctx.register("{table}", {table})')
+
+        lines.append("")
+
+        # Escape the query for embedding in triple quotes
+        escaped_query = query.replace('\\', '\\\\').replace('"""', '\\"\\"\\"')
+
+        # Add query execution
+        lines.extend([
+            "# Execute query and get explain plan",
+            f'sink = ctx.execute("""{escaped_query}""")',
+            "final_plan = sink.explain()",
+            "",
+            "# Reset context by unregistering all tables",
+        ])
+
+        # Unregister all tables
+        for table in used_tables:
+            lines.append(f'ctx.unregister("{table}")')
+
+        return "\n".join(lines)
 
     def _execute_code_with_capture(self, code, namespace, code_type):
         """Execute code with output capture and error handling"""
         print(f"[{datetime.now()}] Executing received code...")
+
+        if code_type == "sql":
+            code = self.wrap_sql_query(code)
 
         stdout_capture_opt, stderr_capture_opt = self._create_output_captures()
         with redirect_stdout(stdout_capture_opt), redirect_stderr(stderr_capture_opt):
@@ -448,10 +575,7 @@ class PolarsFuzzingHandler(BaseHTTPRequestHandler):
 
     def _try_exec_code(self, code, namespace, code_type):
         ns_local = {}
-        final_code = code
-        if code_type == "sql":
-            final_code = f"""print(table_env.sql_query(\"\"\"{code}\"\"\").explain())"""
-        return self._try_execute_code(final_code, namespace)
+        return self._try_execute_code(code, namespace)
 
     def _try_execute_code(self, code, namespace):
         """Attempt code execution and capture any errors, including segfaults"""

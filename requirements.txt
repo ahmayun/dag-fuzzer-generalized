@@ -60,3 +60,4 @@ tzdata==2025.2
 urllib3==2.4.0
 zstandard==0.23.0
 anthropic==0.76.0
+dotenv==0.9.9

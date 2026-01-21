@@ -411,15 +411,16 @@ def plot_timeseries(
 
         new_x = np.arange(x_min, x_max + interpolate_step_sec, interpolate_step_sec)
 
-        plot_df = (
-            plot_df
-            .set_index("elapsed_sec")
-            .reindex(plot_df.set_index("elapsed_sec").index.union(new_x))
-            .sort_index()
-            .interpolate(method="linear")
-            .loc[new_x]
-            .reset_index()
-        )
+        # Set index and interpolate
+        plot_df = plot_df.set_index("elapsed_sec")
+        plot_df = plot_df.reindex(plot_df.index.union(new_x))
+        plot_df = plot_df.sort_index()
+        plot_df = plot_df.interpolate(method="linear")
+        plot_df = plot_df.loc[new_x]
+        plot_df = plot_df.reset_index()
+        # Ensure the index column is named 'elapsed_sec'
+        if 'index' in plot_df.columns and 'elapsed_sec' not in plot_df.columns:
+            plot_df = plot_df.rename(columns={'index': 'elapsed_sec'})
 
     plt.figure(figsize=(8, 4))
     plt.plot(plot_df["elapsed_sec"], plot_df["regions_covered"], label="Regions covered")

@@ -509,13 +509,14 @@ def create_cumulative_profdata_files(
     """
     Create cumulative profdata files where each snapshot is merged with all previous ones.
 
-    Only creates cumulative files for selected data points (evenly spaced in time).
+    Uses incremental merging for efficiency: each cumulative file is created by merging
+    the previous cumulative file with new input files, rather than re-merging all files.
 
     For example, if input files are [t1, t2, ..., t100] and num_datapoints=3:
     - Select indices [0, 50, 99] (approximately)
-    - cumulative_t1.profdata = merge(t1)
-    - cumulative_t50.profdata = merge(t1, t2, ..., t50)
-    - cumulative_t100.profdata = merge(t1, t2, ..., t100)
+    - cumulative_t1.profdata = merge(t1, ..., t10)
+    - cumulative_t50.profdata = merge(cumulative_t1.profdata, t11, ..., t50)
+    - cumulative_t100.profdata = merge(cumulative_t50.profdata, t51, ..., t100)
 
     Returns list of cumulative profdata files.
     """
@@ -544,11 +545,16 @@ def create_cumulative_profdata_files(
     print(f"📊 Total input files: {len(sorted_inputs)}")
     print()
 
+    prev_cumulative: Optional[Path] = None
+    prev_idx = -1
+
     for i, idx in enumerate(selected_indices, start=1):
         prof = sorted_inputs[idx]
 
-        # Files to merge: all files from start up to and including this one
-        files_to_merge = sorted_inputs[:idx + 1]
+        # Files to merge: new files since last cumulative point
+        # If this is the first point, merge from the beginning
+        start_idx = prev_idx + 1
+        files_to_merge = sorted_inputs[start_idx:idx + 1]
 
         # Output filename maintains the timestamp of the latest file
         output_name = f"cumulative_{prof.name}"
@@ -556,13 +562,35 @@ def create_cumulative_profdata_files(
 
         # Build llvm-profdata merge command
         cmd = [llvm_profdata, "merge", "-sparse"]
+
+        # If we have a previous cumulative file, include it first
+        if prev_cumulative is not None:
+            cmd.append(str(prev_cumulative))
+
+        # Add the new files
         cmd.extend([str(f) for f in files_to_merge])
         cmd.extend(["-o", str(output_path)])
+
+        # Calculate total files represented
+        total_files = idx + 1
+        new_files = len(files_to_merge)
 
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             cumulative_files.append(output_path)
-            print(f"✅ [{i}/{len(selected_indices)}] {output_name} (merged {idx + 1} file{'s' if idx + 1 > 1 else ''})")
+
+            if prev_cumulative is not None:
+                print(f"✅ [{i}/{len(selected_indices)}] {output_name} "
+                      f"(merged prev cumulative + {new_files} new file{'s' if new_files != 1 else ''}, "
+                      f"total: {total_files} files)")
+            else:
+                print(f"✅ [{i}/{len(selected_indices)}] {output_name} "
+                      f"(merged {new_files} file{'s' if new_files != 1 else ''})")
+
+            # Update for next iteration
+            prev_cumulative = output_path
+            prev_idx = idx
+
         except subprocess.CalledProcessError as e:
             msg = e.stderr.strip() if e.stderr else str(e)
             raise RuntimeError(f"llvm-profdata merge failed for {output_name}: {msg}") from e

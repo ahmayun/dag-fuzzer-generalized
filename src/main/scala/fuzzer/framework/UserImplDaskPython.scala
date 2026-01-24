@@ -1,15 +1,23 @@
 package fuzzer.framework
 
 import fuzzer.code.SourceCode
+import fuzzer.core.exceptions.DAGFuzzerException
 import fuzzer.core.graph.{DFOperator, Graph, Node}
 import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
-import fuzzer.data.types.{BooleanType, DataType}
+import fuzzer.data.types.{BooleanType, DataType, DateType, DecimalType, FloatType, IntegerType, LongType, StringType}
 import fuzzer.utils.random.Random
 import play.api.libs.json._
 
+import scala.sys.process._
+import java.nio.file.{Files, Paths}
 import scala.collection.mutable
+import scala.io.Source
 
 object UserImplDaskPython {
+
+  // ============================================================================
+  // MAIN ENTRY POINTS
+  // ============================================================================
 
   def constructDFOCall(spec: JsValue, node: Node[DFOperator], in1: String, in2: String): String = {
     val opName = node.value.name
@@ -19,49 +27,460 @@ object UserImplDaskPython {
       return opName
     }
 
-    // Get operation type
     val opType = (opSpec \ "type").as[String]
-
-    // Get parameters
     val parameters = (opSpec \ "parameters").as[JsObject]
 
-    // Generate arguments based on parameters
-    val args = generateArguments(node, parameters, opType, in2)
-
-    // Construct the function call based on operation type
     opType match {
-      case "source" => constructSourceCall(node, spec, opName, opType, parameters, args)
-      case "unary" if opName == "groupby" => s"$in1.$opName(${args.mkString(", ")}).${constructAggFollowup(node, spec, opName, opType, parameters, args)}"
-      case _ => s"$in1.$opName(${args.mkString(", ")})"
+      case "source" => generateSourceOperation(node, spec, opName, parameters)
+      case "unary" => generateUnaryOperation(node, spec, opName, parameters, in1)
+      case "binary" => generateBinaryOperation(node, spec, opName, parameters, in1, in2)
+      case _ => s"$in1.$opName(${generateArguments(node, parameters, opType, in2).mkString(", ")})"
     }
   }
 
-  private def constructAggFollowup(node: Node[DFOperator], spec: JsValue, opName: String, opType: String, parameters: JsObject, args: List[String]): String = {
+  def dag2DaskPython(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
+    val preamble = generatePreamble()
+    val l = mutable.ListBuffer[String]()
+    val variablePrefix = "df"
+    val finalVariableName = "result"
+
+    // Add dask imports
+    l += "import dask.dataframe as dd"
+    l += "import pandas as pd"
+    l += "import numpy as np"
+    l += preamble
+
+    graph.traverseTopological { node =>
+      node.value.varName = s"$variablePrefix${node.id}"
+
+      val call = node.getInDegree match {
+        case 0 =>
+          val loadCall = constructDFOCall(spec, node, null, null)
+          loadCall
+        case 1 => constructDFOCall(spec, node, node.parents.head.value.varName, null)
+        case 2 => constructDFOCall(spec, node, node.parents.head.value.varName, node.parents.last.value.varName)
+      }
+
+      val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
+      val line = s"$lhs$call"
+
+      l += line
+    }
+
+    // Dask uses task graph visualization or compute() for execution
+//    l += s"final_graph = $finalVariableName.explain()"
+     l += s"final_df = $finalVariableName.compute()"
+    l += s"""final_plan = "dummy" """
+
+    val code = l.mkString("\n")
+    SourceCode(src = code, ast = null, preamble = preamble)
+  }
+
+  def generatePreamble(): String = {
+    s"""
+       |${generatePreloadedUDF()}
+       |""".stripMargin
+  }
+
+  // ============================================================================
+  // UDF GENERATORS
+  // ============================================================================
+
+  def generatePreloadedUDF(): String = {
+    val config = fuzzer.core.global.State.config.get
+
+    val pythonScriptPath: String = "llm-caller/generator.py"
+    val numTries: Int = 3
+    val batch = (fuzzer.core.global.State.iteration / config.refreshUdfsAfter).toInt
+    val outDir = s"generated/Dask"
+    val outPath = s"$outDir/udfs_$batch.json"
+    val prompt = s"""
+Generate a json file of the following format
+```
+{ "functions": ["def mapPartitionsUdf(df): ..."] }
+```
+The functions array should contain ${config.numUdfsPerLLMCall} Python functions. Each function should be short and simple that does something arbitrary.
+Each function should be:
+- Named "mapPartitionsUdf"
+- Complete and runnable
+- Contain only code (no comments or docstrings)
+- Take a single pandas DataFrame argument and return a pandas DataFrame
+- Should be between 1-10 lines of code
+- Must preserve the DataFrame structure (same columns)
+""".trim
+
+    val udfList =
+      if (!Files.exists(Paths.get(outPath)) ||
+        (fuzzer.core.global.State.iteration % config.refreshUdfsAfter) == 0) {
+
+        var lastException: Throwable = null
+        var attempt = 0
+        var success = false
+
+        while (attempt < numTries && !success) {
+          try {
+            generatePreloadedUDF(
+              pythonScriptPath,
+              prompt,
+              outDir,
+              outPath
+            )
+            success = true
+          } catch {
+            case e: Throwable =>
+              lastException = e
+              attempt += 1
+          }
+        }
+
+        if (!success) {
+          val outPathObj = Paths.get(outPath)
+          if (Files.exists(outPathObj)) {
+            Files.delete(outPathObj)
+          }
+
+          val previousBatchOpt =
+            (0 until batch).reverse
+              .map(b => s"$outDir/udfs_$b.json")
+              .find(p => Files.exists(Paths.get(p)))
+
+          previousBatchOpt match {
+            case Some(prevPath) =>
+              readFunctionsFromJson(prevPath)
+
+            case None =>
+              throw new DAGFuzzerException(
+                s"UDF Generation failed after $numTries tries and no previous batch exists",
+                lastException
+              )
+          }
+        } else {
+          readFunctionsFromJson(outPath)
+        }
+
+      } else {
+        readFunctionsFromJson(outPath)
+      }
+
+    Random.choice(udfList)
+  }
+
+  def generatePreloadedUDF(pythonScriptPath: String, prompt: String, outDir: String, outPath: String): List[String] = {
+    Files.createDirectories(Paths.get(outDir))
+
+    val cmd = Seq(
+      "oracle-servers/venv/bin/python",
+      pythonScriptPath,
+      "--prompt", prompt,
+      "--out", outPath
+    )
+
+    cmd.!
+
+    readFunctionsFromJson(outPath)
+  }
+
+  def readFunctionsFromJson(path: String): List[String] = {
+    val source = Source.fromFile(path)
+    try {
+      val jsonStr = source.mkString
+      val json = Json.parse(jsonStr)
+      (json \ "functions").as[List[String]]
+    } finally {
+      source.close()
+    }
+  }
+
+  // ============================================================================
+  // OPERATION TYPE GENERATORS
+  // ============================================================================
+
+  private def generateSourceOperation(
+                                       node: Node[DFOperator],
+                                       spec: JsValue,
+                                       opName: String,
+                                       parameters: JsObject
+                                     ): String = {
+    val tableName = fuzzer.core.global.State.src2TableMap(node.id).identifier
+    opName match {
+      case "dd.read_parquet" =>
+        s"""dd.read_parquet("tpcds-data-5pc/$tableName").rename(columns={col: f"{col}_${node.id}" for col in dd.read_parquet("tpcds-data-5pc/$tableName").columns})"""
+      case _ =>
+        // Generate synthetic data as Dask DataFrame from pandas
+        val rows = Random.nextInt(90) + 10
+        val cols = Random.nextInt(5) + 3
+        val npartitions = Random.nextInt(4) + 1
+        s"""dd.from_pandas(pd.DataFrame({
+           |    ${(0 until cols).map(i => s"'col_$i': np.random.rand($rows)").mkString(",\n    ")}
+           |}), npartitions=$npartitions)""".stripMargin
+    }
+  }
+
+  private def generateUnaryOperation(
+                                      node: Node[DFOperator],
+                                      spec: JsValue,
+                                      opName: String,
+                                      parameters: JsObject,
+                                      in1: String
+                                    ): String = {
+    opName match {
+      case "rename" => generateRenameOperation(node, parameters, in1)
+      case "groupby" => generateGroupByOperation(node, parameters, in1)
+      case "map_partitions" => generateMapPartitionsOperation(node, parameters, in1)
+      case "query" => generateQueryOperation(node, parameters, in1)
+      case "loc" => generateLocOperation(node, parameters, in1)
+      case "sort_values" => generateSortValuesOperation(node, parameters, in1)
+      case "drop_duplicates" => generateDropDuplicatesOperation(node, parameters, in1)
+      case "head" => generateHeadOperation(node, parameters, in1)
+      case "fillna" => generateFillnaOperation(node, parameters, in1)
+      case "dropna" => generateDropnaOperation(node, parameters, in1)
+      case "repartition" => generateRepartitionOperation(node, parameters, in1)
+      case "persist" => generatePersistOperation(node, parameters, in1)
+      case "compute" => generateComputeOperation(node, parameters, in1)
+      case _ => generateGenericUnaryOperation(node, opName, parameters, in1)
+    }
+  }
+
+  private def generateBinaryOperation(
+                                       node: Node[DFOperator],
+                                       spec: JsValue,
+                                       opName: String,
+                                       parameters: JsObject,
+                                       in1: String,
+                                       in2: String
+                                     ): String = {
+    opName match {
+      case "merge" => generateMergeOperation(node, parameters, in1, in2)
+      case _ => generateGenericBinaryOperation(node, opName, parameters, in1, in2)
+    }
+  }
+
+  // ============================================================================
+  // SPECIFIC OPERATION GENERATORS
+  // ============================================================================
+
+  private def generateRenameOperation(
+                                       node: Node[DFOperator],
+                                       parameters: JsObject,
+                                       in1: String
+                                     ): String = {
+    val oldCol = pickRandomColumnFromReachableSources(node)._2.name
+    val newName = Random.alphanumeric.take(8).mkString
+    updateSourceState(node, parameters \ "columns", "columns", "dict", s"{'$oldCol': '$newName'}")
+    propagateState(node)
+    s"$in1.rename(columns={'$oldCol': '$newName'})"
+  }
+
+  private def constructAggFollowup(node: Node[DFOperator]): String = {
     val (table, col) = pickRandomColumnFromReachableSources(node)
-    // Choose between sum, mean, count, etc.
-    val aggFuncs = Seq("sum", "mean", "count", "min", "max", "std", "var", "size")
+    // Choose between sum, mean, count, min, max
+    val aggFuncs = Seq("sum(numeric_only=True)", "mean(numeric_only=True)", "count()", "min(numeric_only=True)", "max(numeric_only=True)")
     val chosenAggFunc = aggFuncs(scala.util.Random.nextInt(aggFuncs.length))
 
-    val fullColName = constructFullColumnName(table, col)
+    val fullColName = col.name
 
     filterColumns(fullColName, node)
     propagateState(node)
 
-    // Dask uses pandas-like aggregation syntax
-    s"agg({'$fullColName': '$chosenAggFunc'}).reset_index()"
+    // Dask groupby aggregation syntax
+    s"$chosenAggFunc.reset_index()[['$fullColName']]"
   }
 
-  private def constructSourceCall(node: Node[DFOperator], spec: JsValue, opName: String, opType: String, parameters: JsObject, args: List[String]): String = {
-    val tableName = fuzzer.core.global.State.src2TableMap(node.id).identifier
-    opName match {
-//      case "dd.read_csv" => s"""dd.read_csv("$tableName")"""
-//      case "dd.read_parquet" => s"""dd.read_parquet("$tableName")"""
-//      case _ => s"$opName(${args.mkString(", ")})"
-      case _ => s"$tableName" // we are already loading the table at the oracle server
+  private def generateGroupByOperation(
+                                        node: Node[DFOperator],
+                                        parameters: JsObject,
+                                        in1: String
+                                      ): String = {
+    val groupCol = pickRandomColumnFromReachableSources(node)._2.name
+    s"$in1.groupby('$groupCol').${constructAggFollowup(node)}"
+  }
+
+  private def generateMapPartitionsOperation(
+                                              node: Node[DFOperator],
+                                              parameters: JsObject,
+                                              in1: String
+                                            ): String = {
+    // map_partitions applies a function to each partition (pandas DataFrame)
+    // Generate a simple transformation function
+    val (_, col) = pickRandomColumnFromReachableSources(node)
+    val colName = col.name
+
+    val udfProb = 0.3
+    if (Random.nextDouble() < udfProb) {
+      // Use the preloaded UDF
+      s"$in1.map_partitions(mapPartitionsUdf, meta=$in1._meta)"
+    } else {
+      // Generate inline lambda transformation
+      col.dataType match {
+        case fuzzer.data.types.IntegerType | fuzzer.data.types.LongType =>
+          s"$in1.map_partitions(lambda df: df.assign($colName=df['$colName'] * 2), meta=$in1._meta)"
+        case fuzzer.data.types.FloatType | fuzzer.data.types.DecimalType =>
+          s"$in1.map_partitions(lambda df: df.assign($colName=df['$colName'].round(2)), meta=$in1._meta)"
+        case fuzzer.data.types.StringType =>
+          s"$in1.map_partitions(lambda df: df.assign($colName=df['$colName'].str.upper()), meta=$in1._meta)"
+        case _ =>
+          s"$in1.map_partitions(lambda df: df, meta=$in1._meta)"
+      }
     }
   }
 
-  def generateArguments(node: Node[DFOperator], parameters: JsObject, opType: String, in2: String): List[String] = {
+  private def generateQueryOperation(
+                                      node: Node[DFOperator],
+                                      parameters: JsObject,
+                                      in1: String
+                                    ): String = {
+    val predicate = generateQueryPredicate(node)
+    s"""$in1.query("$predicate")"""
+  }
+
+  private def generateLocOperation(
+                                    node: Node[DFOperator],
+                                    parameters: JsObject,
+                                    in1: String
+                                  ): String = {
+    val predicate = generateLocPredicate(node, in1)
+    s"$in1.loc[$predicate]"
+  }
+
+  private def generateSortValuesOperation(
+                                           node: Node[DFOperator],
+                                           parameters: JsObject,
+                                           in1: String
+                                         ): String = {
+    val sortCol = pickRandomColumnFromReachableSources(node)._2.name
+    val ascending = Random.choice(List("True", "False"))
+    s"$in1.sort_values(by='$sortCol', ascending=$ascending)"
+  }
+
+  private def generateDropDuplicatesOperation(
+                                               node: Node[DFOperator],
+                                               parameters: JsObject,
+                                               in1: String
+                                             ): String = {
+    if (Random.nextBoolean()) {
+      val col = pickRandomColumnFromReachableSources(node)._2.name
+      s"$in1.drop_duplicates(subset=['$col'])"
+    } else {
+      s"$in1.drop_duplicates()"
+    }
+  }
+
+  private def generateHeadOperation(
+                                     node: Node[DFOperator],
+                                     parameters: JsObject,
+                                     in1: String
+                                   ): String = {
+    val n = Random.nextInt(100) + 1
+    val compute = Random.choice(List("True", "False"))
+    s"$in1.head(n=$n, compute=$compute)"
+  }
+
+  private def generateFillnaOperation(
+                                       node: Node[DFOperator],
+                                       parameters: JsObject,
+                                       in1: String
+                                     ): String = {
+    val (_, col) = pickRandomColumnFromReachableSources(node)
+    col.dataType match {
+      case fuzzer.data.types.IntegerType | fuzzer.data.types.LongType =>
+        s"$in1.fillna(value=0)"
+      case fuzzer.data.types.FloatType | fuzzer.data.types.DecimalType =>
+        s"$in1.fillna(value=0.0)"
+      case fuzzer.data.types.StringType =>
+        s"$in1.fillna(value='')"
+      case fuzzer.data.types.BooleanType =>
+        s"$in1.fillna(value=False)"
+      case _ =>
+        s"$in1.fillna(value=0)"
+    }
+  }
+
+  private def generateDropnaOperation(
+                                       node: Node[DFOperator],
+                                       parameters: JsObject,
+                                       in1: String
+                                     ): String = {
+    val columns = getAllColumns(node).map(_._2).take(Random.nextInt(3) + 1)
+    val colList = columns.map(c => s"'${c.name}'").mkString(", ")
+    val how = Random.choice(List("'any'", "'all'"))
+    s"$in1.dropna(subset=[$colList], how=$how)"
+  }
+
+  private def generateRepartitionOperation(
+                                            node: Node[DFOperator],
+                                            parameters: JsObject,
+                                            in1: String
+                                          ): String = {
+    val npartitions = Random.nextInt(8) + 1
+    s"$in1.repartition(npartitions=$npartitions)"
+  }
+
+  private def generatePersistOperation(
+                                        node: Node[DFOperator],
+                                        parameters: JsObject,
+                                        in1: String
+                                      ): String = {
+    s"$in1.persist()"
+  }
+
+  private def generateComputeOperation(
+                                        node: Node[DFOperator],
+                                        parameters: JsObject,
+                                        in1: String
+                                      ): String = {
+    // Note: compute() returns a pandas DataFrame, wrapping it back to dask
+    s"dd.from_pandas($in1.compute(), npartitions=1)"
+  }
+
+  private def generateMergeOperation(
+                                      node: Node[DFOperator],
+                                      parameters: JsObject,
+                                      in1: String,
+                                      in2: String
+                                    ): String = {
+    val joinTypes = List("inner", "left", "right", "outer")
+    val how = joinTypes(Random.nextInt(joinTypes.length))
+
+    UserImplFlinkPython.pickTwoColumns(node.value.stateView) match {
+      case Some(((_, leftCol), (_, rightCol))) => s"$in1.merge($in2, left_on='${leftCol.name}', right_on='${rightCol.name}', how='$how')"
+      case None =>
+        val col = pickRandomColumnFromReachableSources(node)
+        s"$in1.merge($in2, on='${col._2.name}', how='$how')"
+    }
+
+  }
+
+  private def generateGenericUnaryOperation(
+                                             node: Node[DFOperator],
+                                             opName: String,
+                                             parameters: JsObject,
+                                             in1: String
+                                           ): String = {
+    val args = generateArguments(node, parameters, "unary", null)
+    s"$in1.$opName(${args.mkString(", ")})"
+  }
+
+  private def generateGenericBinaryOperation(
+                                              node: Node[DFOperator],
+                                              opName: String,
+                                              parameters: JsObject,
+                                              in1: String,
+                                              in2: String
+                                            ): String = {
+    val args = generateArguments(node, parameters, "binary", in2)
+    s"$in1.$opName(${args.mkString(", ")})"
+  }
+
+  // ============================================================================
+  // PARAMETER AND ARGUMENT GENERATION
+  // ============================================================================
+
+  def generateArguments(
+                         node: Node[DFOperator],
+                         parameters: JsObject,
+                         opType: String,
+                         in2: String
+                       ): List[String] = {
     val paramNames = parameters.keys.toList
 
     paramNames.flatMap { paramName =>
@@ -70,15 +489,57 @@ object UserImplDaskPython {
       val required = (param \ "required").as[Boolean]
       val hasDefault = (param \ "default").isDefined
 
-      // For binary operations with DataFrame parameter, use in2
       if (paramName == "other" && paramType == "DataFrame" && opType == "binary") {
         Some(in2)
       } else if (required || (!hasDefault && Random.nextBoolean())) {
-        // Generate a value for required parameters or randomly for optional ones
         Some(s"$paramName=${generateRandomValue(node, param, paramType, paramName)}")
       } else {
-        None // Skip optional parameter
+        None
       }
+    }
+  }
+
+  def generateRandomValue(
+                           node: Node[DFOperator],
+                           param: JsLookupResult,
+                           paramType: String,
+                           paramName: String
+                         ): String = {
+    val allowedValues: Option[Seq[JsValue]] = (param \ "values").asOpt[Seq[JsValue]]
+
+    allowedValues match {
+      case Some(values) if values.nonEmpty =>
+        val randomValue = values(Random.nextInt(values.length))
+        randomValue match {
+          case JsString(str) => s"'$str'"
+          case other => other.toString
+        }
+
+      case _ =>
+        paramType match {
+          case "int" => Random.nextInt(100).toString
+          case "bool" => if (Random.nextBoolean()) "True" else "False"
+          case "str" | "string" => s"'${Random.alphanumeric.take(8).mkString}'"
+          case "dict" | "dict[str,str]" => "{}"
+          case "callable" => "lambda x: x"
+          case "dict|DataFrame" => "{}"
+          case "scalar|dict" => Random.nextInt(100).toString
+          case "list[str]" =>
+            val cols = getAllColumns(node).map(_._2.name).take(Random.nextInt(2) + 1)
+            s"[${cols.map(c => s"'$c'").mkString(", ")}]"
+          case "str|list[str]" =>
+            if (Random.nextBoolean()) {
+              val col = pickRandomColumnFromReachableSources(node)._2.name
+              s"'$col'"
+            } else {
+              val cols = getAllColumns(node).map(_._2.name).take(Random.nextInt(2) + 1)
+              s"[${cols.map(c => s"'$c'").mkString(", ")}]"
+            }
+          case "bool|list[bool]" =>
+            if (Random.nextBoolean()) "True" else "False"
+          case "Expression" => generateLocPredicate(node, "df")
+          case _ => s"'${Random.alphanumeric.take(8).mkString}'"
+        }
     }
   }
 
@@ -86,9 +547,95 @@ object UserImplDaskPython {
     typeJson match {
       case JsString(t) => t
       case JsArray(types) => types(Random.nextInt(types.length)).as[String]
-      case _ => "str" // Default to string
+      case _ => "str"
     }
   }
+
+  // ============================================================================
+  // EXPRESSION GENERATORS
+  // ============================================================================
+
+  def generateDaskExpression(node: Node[DFOperator], col: ColumnMetadata, dfVar: String): String = {
+    val colName = col.name
+
+    col.dataType match {
+      case fuzzer.data.types.IntegerType | fuzzer.data.types.LongType =>
+        val op = Random.nextInt(4)
+        op match {
+          case 0 => s"$dfVar['$colName'] * 2"
+          case 1 => s"$dfVar['$colName'] + ${Random.nextInt(100)}"
+          case 2 => s"$dfVar['$colName'].abs()"
+          case _ => s"$dfVar['$colName']"
+        }
+      case fuzzer.data.types.FloatType | fuzzer.data.types.DecimalType =>
+        val op = Random.nextInt(3)
+        op match {
+          case 0 => s"$dfVar['$colName'].round(2)"
+          case 1 => s"$dfVar['$colName'] * ${Random.nextFloat()}"
+          case _ => s"$dfVar['$colName']"
+        }
+      case fuzzer.data.types.StringType =>
+        val op = Random.nextInt(3)
+        op match {
+          case 0 => s"$dfVar['$colName'].str.len()"
+          case 1 => s"$dfVar['$colName'].str.upper()"
+          case _ => s"$dfVar['$colName']"
+        }
+      case fuzzer.data.types.BooleanType =>
+        s"~$dfVar['$colName']"
+      case _ =>
+        s"$dfVar['$colName']"
+    }
+  }
+
+  def generateQueryPredicate(node: Node[DFOperator]): String = {
+    val (_, col) = pickRandomColumnFromReachableSources(node)
+    val colName = col.name
+
+    col.dataType match {
+      case fuzzer.data.types.IntegerType | fuzzer.data.types.LongType =>
+        val value = Random.nextInt(100)
+        val ops = List(">", "<", ">=", "<=", "==", "!=")
+        val op = ops(Random.nextInt(ops.length))
+        s"$colName $op $value"
+      case fuzzer.data.types.FloatType | fuzzer.data.types.DecimalType =>
+        val value = Random.nextFloat() * 100
+        s"$colName > $value"
+      case fuzzer.data.types.StringType =>
+        // Query syntax for string length comparison
+        s"$colName.str.len() > 5"
+      case fuzzer.data.types.BooleanType =>
+        if (Random.nextBoolean()) s"$colName == True" else s"$colName == False"
+      case _ =>
+        s"$colName == $colName"  // Always true, fallback
+    }
+  }
+
+  def generateLocPredicate(node: Node[DFOperator], dfVar: String): String = {
+    val (_, col) = pickRandomColumnFromReachableSources(node)
+    val colName = col.name
+
+    col.dataType match {
+      case fuzzer.data.types.IntegerType | fuzzer.data.types.LongType =>
+        val value = Random.nextInt(100)
+        val ops = List(">", "<", ">=", "<=", "==", "!=")
+        val op = ops(Random.nextInt(ops.length))
+        s"$dfVar['$colName'] $op $value"
+      case fuzzer.data.types.FloatType | fuzzer.data.types.DecimalType =>
+        val value = Random.nextFloat() * 100
+        s"$dfVar['$colName'] > $value"
+      case fuzzer.data.types.StringType =>
+        s"$dfVar['$colName'].str.len() > 5"
+      case fuzzer.data.types.BooleanType =>
+        if (Random.nextBoolean()) s"$dfVar['$colName']" else s"~$dfVar['$colName']"
+      case _ =>
+        s"$dfVar['$colName'].notna()"
+    }
+  }
+
+  // ============================================================================
+  // COLUMN SELECTION UTILITIES
+  // ============================================================================
 
   def pickRandomReachableSource(node: Node[DFOperator]): Node[DFOperator] = {
     val sources = node.getReachableSources.toSeq
@@ -96,40 +643,58 @@ object UserImplDaskPython {
     sources(Random.nextInt(sources.length))
   }
 
-  def getAllColumns(node: Node[DFOperator], preferUnique: Boolean = true): Seq[(TableMetadata, ColumnMetadata)] = {
+  def getAllColumns(node: Node[DFOperator], preferUnique: Boolean = false ): Seq[(TableMetadata, ColumnMetadata)] = {
     val tablesColPairs = node.value.stateView.values.toSeq.flatMap { t =>
       t.columns.map(c => (t, c))
     }
-//    println(s"[getAllColumns] tableColPairs.length = ${tablesColPairs.length} | stateView.size = ${node.value.stateView.size}")
     tablesColPairs
   }
 
-  def pickRandomColumnFromReachableSources(node: Node[DFOperator], preferUnique: Boolean = true): (TableMetadata, ColumnMetadata) = {
+  def pickRandomColumnFromReachableSources(
+                                            node: Node[DFOperator],
+                                            preferUnique: Boolean = false
+                                          ): (TableMetadata, ColumnMetadata) = {
     val tablesColPairs = getAllColumns(node, preferUnique).filter {
       case (_, col) =>
         col.metadata.get("gen-iteration") match {
           case None => true
-          case Some(i) =>
-            fuzzer.core.global.State.iteration.toString != i
+          case Some(i) => fuzzer.core.global.State.iteration.toString != i
         }
     }
-    assert(tablesColPairs.nonEmpty, s"Expected columnNames to be non-empty: stateViewMap = ${node.value.stateView}")
-    val pick = tablesColPairs(Random.nextInt(tablesColPairs.length))
+
+    val numericOnly = tablesColPairs.filter{
+      case (_, col) if col.dataType == StringType => false
+      case _ => true
+    }
+
+    val finalList = tablesColPairs // if(numericOnly.nonEmpty) numericOnly else tablesColPairs
+
+
+    assert(finalList.nonEmpty, s"Expected columnNames to be non-empty: stateViewMap = ${node.value.stateView}")
+    val pick = finalList(Random.nextInt(finalList.length))
     pick
   }
 
+  def pickRandomColumnFromNode(node: Node[DFOperator]): (TableMetadata, ColumnMetadata) = {
+    val tablesColPairs = node.value.stateView.values.toSeq.flatMap { t =>
+      t.columns.map(c => (t, c))
+    }
+    assert(tablesColPairs.nonEmpty, "Expected columns to be non-empty")
+    tablesColPairs(Random.nextInt(tablesColPairs.length))
+  }
+
+  // ============================================================================
+  // STATE MANAGEMENT
+  // ============================================================================
+
   def renameTables(newValue: String, node: Node[DFOperator]): Unit = {
     val dfOp = node.value
-
-    // Rename each table metadata entry in the stateView
     val renamedStateView: Map[String, TableMetadata] = dfOp.stateView.map {
       case (id, tableMeta) =>
-        val renamed = tableMeta.copy() // get a deep copy
-        renamed.setIdentifier(newValue) // modify as needed
+        val renamed = tableMeta.copy()
+        renamed.setIdentifier(newValue)
         id -> renamed
     }
-
-    // Update this node's stateView with renamed copies
     dfOp.stateView = renamedStateView
   }
 
@@ -141,10 +706,11 @@ object UserImplDaskPython {
     ))
   }
 
-  def filterColumns(paramVal: String, node: Node[DFOperator]): Unit = {
+  def filterColumns(columns: String, node: Node[DFOperator]): Unit = {
+    val colNames = columns.split(",").map(_.trim)
     node.value.stateView = node.value.stateView.map {
       case (tname, tmd) =>
-        (tname -> tmd.filterColumns(Array(paramVal)))
+        (tname -> tmd.filterColumns(colNames))
     }
   }
 
@@ -155,14 +721,13 @@ object UserImplDaskPython {
                          paramType: String,
                          paramVal: String
                        ): Unit = {
-    val effect = (param \ "state-effect").asOpt[String].get
+    val effect = (param \ "state-effect").asOpt[String].getOrElse("")
     effect match {
       case "table-rename" => renameTables(paramVal, node)
       case "column-add" => addColumn(paramVal, node)
       case "column-filter" => filterColumns(paramVal, node)
-      case "column-remove" => filterColumns(paramVal, node)
-      case "column-rename" => renameTables(paramVal, node)
-      case "index-change" => // Dask specific - handled in place
+      case "column-rename" => // Handle column renaming
+      case _ => // No state change
     }
   }
 
@@ -179,7 +744,6 @@ object UserImplDaskPython {
         val currentDFOp = current.value
         val startStateView = startNode.value.stateView
 
-        // Only update keys that are also present in startNode.stateView
         val updatedView = currentDFOp.stateView.map {
           case (key, _) if startStateView.contains(key) =>
             key -> startStateView(key).copy()
@@ -188,326 +752,8 @@ object UserImplDaskPython {
         }
 
         currentDFOp.stateView = updatedView
-
-        // Enqueue children
         queue.enqueueAll(current.children)
       }
     }
   }
-
-  def generateOrPickString(
-                            node: Node[DFOperator],
-                            param: JsLookupResult,
-                            paramName: String,
-                            paramType: String
-                          ): String = {
-
-    val isStateAltering: Boolean = (param \ "state-altering").asOpt[Boolean].getOrElse(false)
-
-    if (isStateAltering) {
-      // Generate random string (e.g. for creating a new column)
-      val gen = s"${Random.alphanumeric.take(fuzzer.core.global.State.config.get.maxStringLength).mkString}"
-      updateSourceState(node, param, paramName, paramType, gen)
-      propagateState(node)
-      gen
-    } else {
-      // Pick a column name from reachable source nodes
-      val (table, col) = pickRandomColumnFromReachableSources(node)
-      constructFullColumnName(table, col)
-    }
-  }
-
-  def constructFullColumnName(table: TableMetadata, col: ColumnMetadata): String = {
-    // Dask uses simple column names like pandas
-    s"${col.name}"
-  }
-
-  def pickTwoColumns(stateView: Map[String, TableMetadata]): Option[((TableMetadata, ColumnMetadata), (TableMetadata, ColumnMetadata))] = {
-
-    // Step 1: Flatten all columns and group by DataType -> Map[DataType, List[(TableMetadata, ColumnMetadata)]]
-    val columnsByType: Map[DataType, Seq[(TableMetadata, ColumnMetadata)]] = stateView
-      .values
-      .toSeq
-      .flatMap { table =>
-        table.columns.map(c => (c.dataType, (table, c)))
-      }
-      .groupBy(_._1)
-      .view
-      .mapValues(_.map(_._2))
-      .toMap
-
-    // Step 2: Filter to only those datatypes which have columns from at least 2 distinct tables
-    val viableTypes: Seq[(DataType, Seq[(TableMetadata, ColumnMetadata)])] = columnsByType.toSeq
-      .map { case (dt, cols) =>
-        val tableGroups = cols.groupBy(_._1) // group by TableMetadata
-        (dt, tableGroups)
-      }
-      .filter { case (_, tableGroups) => tableGroups.size >= 2 }
-      .map { case (dt, tableGroups) =>
-        (dt, tableGroups.values.flatten.toSeq)
-      }
-
-    // Step 3: Randomly pick a datatype from viable options
-    if (viableTypes.isEmpty) {
-      return None
-    }
-
-    val (_, candidates) = Random.shuffle(viableTypes).head
-
-    // Step 4: Select two columns from different tables
-    val byTable = candidates.groupBy(_._1).toSeq
-    val shuffledPairs = Random.shuffle(byTable.combinations(2).toSeq)
-    val chosenPair = shuffledPairs.head
-
-    val col1 = Random.shuffle(chosenPair(0)._2).head
-    val col2 = Random.shuffle(chosenPair(1)._2).head
-
-    Some((col1, col2))
-  }
-
-  def pickMultiColumnsFromReachableSources(node: Node[DFOperator]): Option[((TableMetadata, ColumnMetadata), (TableMetadata, ColumnMetadata))] = {
-    pickTwoColumns(node.value.stateView)
-  }
-
-  def generateMultiColumnExpression(
-                                     node: Node[DFOperator],
-                                     param: JsLookupResult,
-                                     paramName: String,
-                                     paramType: String
-                                   ): Option[String] = {
-    pickMultiColumnsFromReachableSources(node) match {
-      case Some(pair) =>
-        val ((table1, col1), (table2, col2)) = pair
-        val fullColName1 = constructFullColumnName(table1, col1)
-        val fullColName2 = constructFullColumnName(table2, col2)
-        // Dask uses pandas-like column access
-        val crossTableExpr = s"df['$fullColName1'] == df['$fullColName2']"
-        Some(crossTableExpr)
-      case None => None
-    }
-  }
-
-  def pickColumnName(
-                      node: Node[DFOperator],
-                      param: JsLookupResult,
-                      paramName: String,
-                      paramType: String
-                    ): String = {
-
-    val isStateAltering: Boolean = (param \ "state-altering").asOpt[Boolean].getOrElse(false)
-
-    val (table, col) = pickRandomColumnFromReachableSources(node)
-    val fullColName = constructFullColumnName(table, col)
-
-    if (isStateAltering) {
-      // Generate random string (e.g. for creating a new column)
-      updateSourceState(node, param, paramName, paramType, fullColName)
-      propagateState(node)
-    }
-    fullColName
-  }
-
-  def generateFilterUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
-    val col = args.head._2
-    val fullColName = constructFullColumnName(args.head._1, col)
-    val chosenType = col.dataType.name.toLowerCase
-    s"x['$fullColName'].apply(filter_udf_$chosenType)"
-  }
-
-  def generateComplexUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
-    val colNames = args.map { case (table, col) => s"'${constructFullColumnName(table, col)}'" }.mkString(", ")
-    s"x[[$colNames]].apply(lambda row: preloaded_udf_complex(*row), axis=1)"
-  }
-
-  def generateUDFCall(node: Node[DFOperator], args: List[(TableMetadata, ColumnMetadata)]): String = {
-    if (node.value.name.contains("filter") || node.value.name.contains("query"))
-      generateFilterUDFCall(node, args)
-    else
-      generateComplexUDFCall(node, args)
-  }
-
-  def generateSingleColumnExpression(
-                                      node: Node[DFOperator],
-                                      param: JsLookupResult,
-                                      paramName: String,
-                                      paramType: String
-                                    ): String = {
-
-    val config = fuzzer.core.global.State.config.get
-    val prob = config.probUDFInsert
-    val chosenTuple@(table, col) = pickRandomColumnFromReachableSources(node)
-    val fullColName = constructFullColumnName(table, col)
-
-    val op = config.logicalOperatorSet.toVector(Random.nextInt(config.logicalOperatorSet.size))
-
-    val intValue = config.randIntMin + Random.nextInt(config.randIntMax - config.randIntMin + 1)
-    val floatValue = config.randFloatMin + Random.nextFloat() * (config.randFloatMax - config.randFloatMin)
-
-    // Dask uses pandas operator syntax
-    val daskOp = op match {
-      case "==" => "=="
-      case "!=" => "!="
-      case ">" => ">"
-      case "<" => "<"
-      case ">=" => ">="
-      case "<=" => "<="
-      case _ => "=="
-    }
-
-    val intExpr = s"$fullColName $daskOp $intValue"
-    val floatExpr = s"$fullColName $daskOp $floatValue"
-    val stringExpr = s"$fullColName.str.len() $daskOp 5"
-    val boolExpr = s"~$fullColName"
-    val udfExpr = generateUDFCall(node, List(chosenTuple))
-
-    if (Random.nextFloat() < prob) {
-      udfExpr
-    } else {
-      col.dataType match {
-        case fuzzer.data.types.IntegerType => intExpr
-        case fuzzer.data.types.FloatType => floatExpr
-        case fuzzer.data.types.StringType => stringExpr
-        case fuzzer.data.types.BooleanType => boolExpr
-        case fuzzer.data.types.LongType => intExpr
-        case fuzzer.data.types.DecimalType => floatExpr
-        case fuzzer.data.types.DateType => stringExpr
-      }
-    }
-  }
-
-  def generateColumnExpression(
-                                node: Node[DFOperator],
-                                param: JsLookupResult,
-                                paramName: String,
-                                paramType: String
-                              ): String = {
-
-    lazy val singleColExpr = generateSingleColumnExpression(node, param, paramName, paramType)
-    if (node.isBinary) {
-      generateMultiColumnExpression(node, param, paramName, paramType) match {
-        case Some(expr) => expr
-        case None => singleColExpr
-      }
-    } else {
-      singleColExpr
-    }
-  }
-
-  def generateRandomValue(node: Node[DFOperator], param: JsLookupResult, paramType: String, paramName: String): String = {
-
-    val maxListLength = fuzzer.core.global.State.config.get.maxListLength
-    // Try to get allowed values from the param JSON
-    val allowedValues: Option[Seq[JsValue]] = (param \ "values").asOpt[Seq[JsValue]]
-
-    // If allowed values are provided, pick one randomly
-    allowedValues match {
-      case Some(values) if values.nonEmpty =>
-        val randomValue = values(Random.nextInt(values.length))
-        randomValue match {
-          case JsString(str) => s"'$str'"
-          case other => other.toString
-        }
-
-      // Generate values if spec doesn't provide fixed options
-      case _ =>
-        paramType match {
-          case "int" => Random.nextInt(100).toString
-          case "bool" => if (Random.nextBoolean()) "True" else "False"
-          case "str" | "string" => s"'${generateOrPickString(node, param, paramName, paramType)}'"
-          case "str|list[str]" =>
-            if (Random.nextBoolean()) s"'${generateOrPickString(node, param, paramName, paramType)}'"
-            else s"[${(0 until Random.nextInt(maxListLength) + 1).map(_ => s"'${generateOrPickString(node, param, paramName, paramType)}'").mkString(", ")}]"
-          case "list[str]" =>
-            s"[${(0 until Random.nextInt(maxListLength) + 1).map(_ => s"'${generateOrPickString(node, param, paramName, paramType)}'").mkString(", ")}]"
-          case "dict[str,str]" =>
-            val numEntries = Random.nextInt(maxListLength) + 1
-            val entries = (0 until numEntries).map { _ =>
-              val key = generateOrPickString(node, param, paramName, "str")
-              val value = generateOrPickString(node, param, paramName, "str")
-              s"'$key': '$value'"
-            }.mkString(", ")
-            s"{$entries}"
-          case "dict[str,Expression]" =>
-            val numEntries = Random.nextInt(maxListLength) + 1
-            val entries = (0 until numEntries).map { _ =>
-              val key = Random.alphanumeric.take(8).mkString
-              val (table, col) = pickRandomColumnFromReachableSources(node)
-              val fullColName = constructFullColumnName(table, col)
-              addColumn(key, node)
-              propagateState(node)
-              s"'$key': '$fullColName'"
-            }.mkString(", ")
-            s"{$entries}"
-          case "Expression" =>
-            s"'${generateColumnExpression(node, param, paramName, paramType)}'"
-          case "callable" => "lambda x: x"
-          case "scalar|dict" =>
-            if (Random.nextBoolean()) Random.nextInt(100).toString
-            else s"{'${pickColumnName(node, param, paramName, "str")}': ${Random.nextInt(100)}}"
-          case _ => s"'${Random.alphanumeric.take(8).mkString}'"
-        }
-    }
-  }
-
-  def generatePreloadedUDF(): String = {
-    s"""
-       |import pandas as pd
-       |import numpy as np
-       |
-       |# String Filter UDFs
-       |def filter_udf_string(arg):
-       |    return len(str(arg)) > 5
-       |
-       |# Integer Filter UDFs
-       |def filter_udf_integer(arg):
-       |    return arg > 0 and arg % 2 == 0
-       |
-       |# Decimal Filter UDFs
-       |def filter_udf_decimal(arg):
-       |    return arg > 0.0 and arg < 1000.0
-       |
-       |# Complex UDF
-       |def preloaded_udf_complex(*args):
-       |    return hash(args[0]) if len(args) > 0 else 0
-       |""".stripMargin
-  }
-
-  def dag2DaskPython(spec: JsValue)(graph: Graph[DFOperator]): SourceCode = {
-    val l = mutable.ListBuffer[String]()
-    val variablePrefix = "auto"
-    val finalVariableName = "sink"
-
-    // Add Dask imports
-    l += "import dask.dataframe as dd"
-    l += "import pandas as pd"
-    l += "import numpy as np"
-    l += generatePreloadedUDF()
-
-    graph.traverseTopological { node =>
-      node.value.varName = s"$variablePrefix${node.id}"
-
-      val call = node.getInDegree match {
-        case 0 =>
-          val loadCall = constructDFOCall(spec, node, null, null)
-          // Add suffix to column names to avoid conflicts in joins
-          s"$loadCall.rename(columns=lambda col: f'{col}_${node.id}')"
-        case 1 => constructDFOCall(spec, node, node.parents.head.value.varName, null)
-        case 2 => constructDFOCall(spec, node, node.parents.head.value.varName, node.parents.last.value.varName)
-      }
-
-      val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
-      val line = s"$lhs$call"
-
-      l += line
-    }
-
-    // Dask uses compute() to trigger execution
-    l += s"print($finalVariableName.head(10))"
-    l += s"# To compute the full result: result = $finalVariableName.compute()"
-
-    val code = l.mkString("\n")
-
-    SourceCode(src = code, ast = null)
-  }
-
 }

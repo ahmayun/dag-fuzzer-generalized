@@ -9,6 +9,8 @@ import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, Executi
 import fuzzer.data.tables.{ColumnMetadata, TableMetadata}
 import fuzzer.data.types._
 import fuzzer.utils.network.HttpUtils
+import net.bytebuddy.ByteBuddy
+import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
 import play.api.libs.json._
 
 import java.io.{BufferedWriter, File, IOException, OutputStreamWriter}
@@ -16,6 +18,7 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.net.URI
 import java.time.Duration
 import java.net.{ConnectException, Socket}
+import java.util.concurrent.TimeUnit
 import scala.sys.process._
 import scala.util.{Failure, Success, Try}
 
@@ -37,7 +40,7 @@ class DaskDataAdapter(config: FuzzerConfig) extends DataAdapter {
       // Create request JSON
       val requestJson = Json.obj("message_type" -> "get_tables")
 
-      val response = HttpUtils.postJson(client, requestJson, host="localhost", port=8889)
+      val response = HttpUtils.postJson(client, requestJson, host="localhost", port=8890)
       val responseJson = Json.parse(response.body())
 
       // Parse response
@@ -107,7 +110,7 @@ class DaskDataAdapter(config: FuzzerConfig) extends DataAdapter {
       "message_type" -> "load_data"
     )
 
-    val response = HttpUtils.postJson(client, request, "localhost", 8889, timeoutSeconds = 120)
+    val response = HttpUtils.postJson(client, request, "localhost", 8890, timeoutSeconds = 120)
 
     val body = Json.parse(response.body())
     val success = (body \ "success").asOpt[Boolean]
@@ -136,6 +139,8 @@ class DaskCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor
   val client: HttpClient = HttpClient.newBuilder()
     .connectTimeout(Duration.ofSeconds(120))
     .build()
+
+  val exitTimeoutSeconds = 5
 
   private def parseResponse(responseBody: String): Option[JsValue] = {
     if (responseBody.nonEmpty) {
@@ -218,7 +223,7 @@ class DaskCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor
 
     // Server configuration
     val serverHost = "localhost"
-    val serverPort = 8889
+    val serverPort = 8890
 
     // Send source code to Python server as JSON HTTP request
     val codeString = sourceCode.toString
@@ -246,21 +251,25 @@ class DaskCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor
     mapToExecutionResult(responseMap)
   }
 
-  private def createException(errorName: String, errorMessage: String): Exception = {
+  private val byteBuddy = new ByteBuddy()
+  private val classCache = scala.collection.mutable.Map[String, Class[_]]()
 
-    errorName.trim() match {
-      case "ValidationException" => new ValidationException(errorMessage)
-      case "RuntimeException" => new RuntimeException(errorMessage)
-      case "TableException" => new TableException(errorMessage)
-      case "MismatchException" => new MismatchException(errorMessage)
-      case "Success" | "" => new exceptions.Success("Generated query hit the optimizer")
-//      case "ValueError" => new ValidationException(errorMessage)
-//      case "KeyError" => new TableException(errorMessage)
-//      case "TypeError" => new ValidationException(errorMessage)
-//      case "AttributeError" => new RuntimeException(errorMessage)
-//      case "Success" | "" => new exceptions.Success("Generated query executed successfully")
-      case _ => new Exception(errorMessage)
+  private def createException(errorName: String, errorMessage: String): Exception = {
+    val trimmedName = errorName.trim() match {
+      case "Success" | "" => "Success"
+      case name => name
     }
+
+    val exceptionClass = classCache.getOrElseUpdate(trimmedName, {
+      byteBuddy
+        .subclass(classOf[Exception], ConstructorStrategy.Default.IMITATE_SUPER_CLASS)
+        .name(s"com.dynamic.exceptions.$trimmedName")
+        .make()
+        .load(getClass.getClassLoader)
+        .getLoaded
+    })
+
+    exceptionClass.getConstructor(classOf[String]).newInstance(errorMessage).asInstanceOf[Exception]
   }
 
   private def mapToExecutionResult(responseMap: Map[String, Any]): ExecutionResult = {
@@ -278,16 +287,24 @@ class DaskCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecutor
   }
 
   override def setupEnvironment(): () => Unit = {
-    val processBuilder = Process(
-      "oracle-servers/venv/bin/python oracle-servers/dask-oracle-server/basic-json-server.py",
-      None
-    ) #> new File("oracle-servers/.logs/dask-server.log")
+    val processBuilder = new java.lang.ProcessBuilder(
+      "oracle-servers/venv/bin/python",
+      "oracle-servers/dask-oracle-server/basic-json-server.py",
+      "--out-dir", config.outDir,
+      s"--${if(config.coverageCaptureOn) "" else "no-"}coverage-capture",
+    )
+    processBuilder.redirectOutput(new File("oracle-servers/.logs/dask-server.log"))
+    processBuilder.redirectErrorStream(true)
 
-    val process = processBuilder.run()
+    val process = processBuilder.start()
     Thread.sleep(500)
 
     () => {
       process.destroy()
+      if (!process.waitFor(this.exitTimeoutSeconds, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        process.waitFor(this.exitTimeoutSeconds, TimeUnit.SECONDS)
+      }
     }
   }
 

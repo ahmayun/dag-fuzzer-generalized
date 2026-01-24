@@ -1,0 +1,6 @@
+[run]
+concurrency = multiprocessing
+parallel = True
+source = dask
+omit =
+    <string>

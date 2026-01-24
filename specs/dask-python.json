@@ -1,15 +1,10 @@
 {
-  "dd.read_csv": {
+  "dd.read_parquet": {
     "type": "source",
     "parameters": {
       "path": {
         "type": "string",
         "required": true
-      },
-      "blocksize": {
-        "type": "string",
-        "required": true,
-        "default": "64MB"
       }
     },
     "returns": "DataFrame"

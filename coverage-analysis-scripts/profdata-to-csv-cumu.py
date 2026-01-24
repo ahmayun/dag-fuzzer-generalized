@@ -68,6 +68,9 @@ class CovRow:
     lines_cov_pct: float
     lines_covered: int
     lines_total: int
+    branches_cov_pct: float
+    branches_covered: int
+    branches_total: int
 
 
 @dataclass(frozen=True)
@@ -109,57 +112,81 @@ def _parse_pct(s: str) -> float:
         s = s[:-1]
     return float(s)
 
+def _parse_pct_or_zero(s: str) -> float:
+    s = s.strip()
+    if s == "-" or s == "":
+        return 0.0
+    return float(s.rstrip("%"))
 
 def parse_llvm_cov_report_text(report_text: str) -> Tuple[List[CovRow], CovRow]:
-    lines = [ln.rstrip("\n") for ln in report_text.splitlines() if ln.strip()]
-
-    header_seen = False
     rows: List[CovRow] = []
     total: Optional[CovRow] = None
 
-    for ln in lines:
-        if ln.startswith("Filename"):
-            header_seen = True
-            continue
-        if ln.startswith("---"):
-            continue
-        if not header_seen:
+    for ln in report_text.splitlines():
+        ln = ln.rstrip()
+        if not ln or ln.startswith("Filename") or ln.startswith("---"):
             continue
 
-        # Split by whitespace, but keep filename intact by slicing
-        # Filename column is fixed-width in llvm-cov output (~110 chars)
-        name = ln[:110].strip()
-        rest = ln[110:].split()
+        parts = ln.split()
 
-        if len(rest) < 12:
-            continue  # malformed or unexpected
+        # Expect at least:
+        # filename + 12 numeric fields (regions, funcs, lines, branches)
+        if len(parts) < 13:
+            continue
 
-        regions_total = int(rest[0])
-        regions_missed = int(rest[1])
-        regions_pct = float(rest[2].rstrip("%"))
-        regions_covered = regions_total - regions_missed
+        # Numeric fields are ALWAYS the last 12 tokens
+        nums = parts[-12:]
+        name = " ".join(parts[:-12])
 
-        functions_total = int(rest[3])
-        functions_missed = int(rest[4])
-        functions_pct = float(rest[5].rstrip("%"))
-        functions_covered = functions_total - functions_missed
+        (
+            regions_total,
+            regions_missed,
+            regions_pct,
+            functions_total,
+            functions_missed,
+            functions_pct,
+            lines_total,
+            lines_missed,
+            lines_pct,
+            branches_total,
+            branches_missed,
+            branches_pct,
+        ) = nums
 
-        lines_total = int(rest[6])
-        lines_missed = int(rest[7])
-        lines_pct = float(rest[8].rstrip("%"))
-        lines_covered = lines_total - lines_missed
+        regions_total = int(regions_total)
+        regions_missed = int(regions_missed)
+        regions_cov_pct = _parse_pct_or_zero(regions_pct)
+
+        functions_total = int(functions_total)
+        functions_missed = int(functions_missed)
+        functions_cov_pct = _parse_pct_or_zero(functions_pct)
+
+        lines_total = int(lines_total)
+        lines_missed = int(lines_missed)
+        lines_cov_pct = _parse_pct_or_zero(lines_pct)
+
+        branches_total = int(branches_total)
+        branches_missed = int(branches_missed)
+        branches_cov_pct = _parse_pct_or_zero(branches_pct)
 
         row = CovRow(
             name=name,
-            regions_cov_pct=regions_pct,
-            regions_covered=regions_covered,
+
+            regions_cov_pct=regions_cov_pct,
+            regions_covered=regions_total - regions_missed,
             regions_total=regions_total,
-            functions_cov_pct=functions_pct,
-            functions_covered=functions_covered,
+
+            functions_cov_pct=functions_cov_pct,
+            functions_covered=functions_total - functions_missed,
             functions_total=functions_total,
-            lines_cov_pct=lines_pct,
-            lines_covered=lines_covered,
+
+            lines_cov_pct=lines_cov_pct,
+            lines_covered=lines_total - lines_missed,
             lines_total=lines_total,
+
+            branches_cov_pct=branches_cov_pct,
+            branches_covered=branches_total - branches_missed,
+            branches_total=branches_total,
         )
 
         if name == "TOTAL":
@@ -214,6 +241,7 @@ def aggregate_by_group(rows: List[CovRow], group_regex: Optional[re.Pattern]) ->
                 "regions_covered": 0, "regions_total": 0,
                 "functions_covered": 0, "functions_total": 0,
                 "lines_covered": 0, "lines_total": 0,
+                "branches_covered": 0, "branches_total": 0,
             }
         acc[g]["regions_covered"] += r.regions_covered
         acc[g]["regions_total"] += r.regions_total
@@ -221,6 +249,8 @@ def aggregate_by_group(rows: List[CovRow], group_regex: Optional[re.Pattern]) ->
         acc[g]["functions_total"] += r.functions_total
         acc[g]["lines_covered"] += r.lines_covered
         acc[g]["lines_total"] += r.lines_total
+        acc[g]["branches_covered"] += r.branches_covered
+        acc[g]["branches_total"] += r.branches_total
 
     out: Dict[str, CovRow] = {}
     for g, d in acc.items():
@@ -238,6 +268,9 @@ def aggregate_by_group(rows: List[CovRow], group_regex: Optional[re.Pattern]) ->
             lines_cov_pct=pct(d["lines_covered"], d["lines_total"]),
             lines_covered=d["lines_covered"],
             lines_total=d["lines_total"],
+            branches_cov_pct=pct(d["branches_covered"], d["branches_total"]),
+            branches_covered=d["branches_covered"],
+            branches_total=d["branches_total"],
         )
 
     return out
@@ -318,6 +351,7 @@ def write_snapshot_csv(
             "regions_pct", "regions_covered", "regions_total",
             "functions_pct", "functions_covered", "functions_total",
             "lines_pct", "lines_covered", "lines_total",
+            "branches_pct", "branches_covered", "branches_total",
             "profdata_file",
         ])
 
@@ -329,6 +363,7 @@ def write_snapshot_csv(
                 f"{r.regions_cov_pct:.6f}", r.regions_covered, r.regions_total,
                 f"{r.functions_cov_pct:.6f}", r.functions_covered, r.functions_total,
                 f"{r.lines_cov_pct:.6f}", r.lines_covered, r.lines_total,
+                f"{r.branches_cov_pct:.6f}", r.branches_covered, r.branches_total,
                 snapshot.profdata_path.name,
             ])
 
@@ -364,6 +399,9 @@ def write_consolidated_timeseries_csv(
             "lines_pct": tot.lines_cov_pct,
             "lines_covered": tot.lines_covered,
             "lines_total": tot.lines_total,
+            "branches_pct": tot.branches_cov_pct,
+            "branches_covered": tot.branches_covered,
+            "branches_total": tot.branches_total,
             "profdata_file": s.profdata_path.name,
         })
 
@@ -402,6 +440,7 @@ def plot_timeseries(
             "regions_covered",
             "functions_covered",
             "lines_covered",
+            "branches_covered",
         ]
     ].copy()
 
@@ -426,7 +465,7 @@ def plot_timeseries(
     plt.plot(plot_df["elapsed_sec"], plot_df["regions_covered"], label="Regions covered")
     plt.plot(plot_df["elapsed_sec"], plot_df["functions_covered"], label="Functions covered")
     plt.plot(plot_df["elapsed_sec"], plot_df["lines_covered"], label="Lines covered")
-
+    plt.plot(plot_df["elapsed_sec"], plot_df["branches_covered"], label="Branches covered")
     plt.xlabel("Time since start (seconds)")
     plt.ylabel("Covered count")
     plt.title("Cumulative Coverage Growth vs Time (LLVM / Rust)")
@@ -705,7 +744,7 @@ def main() -> None:
             write_snapshot_csv(snap, out_csv, group_regex)
 
             print(f"✅ [{i}/{len(cumulative_profdatas)}] {prof.name} → {out_csv.name} "
-                  f"(lines {snap.totals.lines_cov_pct:.3f}%, funcs {snap.totals.functions_cov_pct:.3f}%, regions {snap.totals.regions_cov_pct:.3f}%)")
+                  f"(lines {snap.totals.lines_cov_pct:.3f}%, funcs {snap.totals.functions_cov_pct:.3f}%, regions {snap.totals.regions_cov_pct:.3f}%, branches {snap.totals.branches_cov_pct:.3f}%)")
 
         except Exception as e:
             print(f"❌ Failed processing {prof.name}: {e}", file=sys.stderr)

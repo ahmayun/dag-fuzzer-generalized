@@ -52,3 +52,5 @@ oracle-servers/polars-oracle-server/test-sql.py
 specs/dask-python-minimal.json
 specs/dask-python-old.json
 tmp
+oracle-servers/dask-oracle-server/test-sql-2.py
+oracle-servers/dask-oracle-server/test-sql.py

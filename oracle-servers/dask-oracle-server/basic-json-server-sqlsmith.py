@@ -382,9 +382,110 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
             'final_program': ""
         }
 
+    def wrap_sql_query(self, query: str) -> str:
+        """
+        Wraps a SQL query to make it runnable with Dask and FugueSQL.
+
+        This function:
+        1. Adds necessary imports
+        2. Detects which TPC-DS tables are referenced in the query
+        3. Lazily loads those tables from parquet files
+        4. Executes the query via FugueSQL and captures the explain plan
+
+        Args:
+            query: A SQL query string that references TPC-DS tables
+
+        Returns:
+            A string containing executable Python code
+        """
+
+        TPCDS_TABLES = [
+            "call_center",
+            "catalog_page",
+            "catalog_returns",
+            "catalog_sales",
+            "customer",
+            "customer_address",
+            "customer_demographics",
+            "date_dim",
+            "household_demographics",
+            "income_band",
+            "inventory",
+            "item",
+            "promotion",
+            "reason",
+            "ship_mode",
+            "store",
+            "store_returns",
+            "store_sales",
+            "time_dim",
+            "warehouse",
+            "web_page",
+            "web_returns",
+            "web_sales",
+            "web_site",
+        ]
+
+        query = re.sub(r'\bmain\.', '', query, flags=re.IGNORECASE)
+
+        # Find which tables are used in the query
+        query_lower = query.lower()
+        used_tables = []
+        for table in TPCDS_TABLES:
+            pattern = rf'(?:^|[\s,(\"])({re.escape(table)})(?:[\s,)\"\.]|$)'
+            if re.search(pattern, query_lower):
+                used_tables.append(table)
+
+        # Escape the query for embedding in triple quotes
+        escaped_query = query.replace('\\', '\\\\').replace('"""', '\\"\\"\\"')
+
+        # Build the code string
+        lines = [
+            "import warnings",
+            "warnings.filterwarnings('ignore', module='fugue_sql')",
+            "",
+            "import dask.dataframe as dd",
+            "from fugue.api import fugue_sql",
+            "",
+            "def main():",
+            "    # Load required tables",
+        ]
+
+        # Add lazy loading for each used table
+        for table in used_tables:
+            lines.append(f'    {table} = dd.read_parquet("tpcds-data-5pc/{table}")')
+
+        lines.append("")
+        lines.append("    # Build tables dict")
+
+        # Build the tables dictionary
+        table_dict_items = ", ".join([f'"{table}": {table}' for table in used_tables])
+        lines.append(f"    tables = {{{table_dict_items}}}")
+
+        lines.append("")
+
+        # Add query execution
+        lines.extend([
+            "    # Execute query",
+            f'    query = """{escaped_query}"""',
+            "",
+            "    result = fugue_sql(query, tables, engine='dask')",
+            "",
+            "    # Print the optimized query plan",
+            "    result.expr.optimize().pprint()",
+            "",
+            "if __name__ == '__main__':",
+            "    main()",
+        ])
+
+        return "\n".join(lines)
+
     def _execute_code_with_capture(self, code, namespace, code_type):
         """Execute code with output capture and error handling"""
         print(f"[{datetime.now()}] Executing received code...")
+
+        if code_type == "sql":
+            code = self.wrap_sql_query(code)
 
         stdout_capture_opt, stderr_capture_opt = self._create_output_captures()
         with redirect_stdout(stdout_capture_opt), redirect_stderr(stderr_capture_opt):
@@ -570,10 +671,8 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
         # Count canonical Python UDF nodes
         return len(re.findall(r"mapPartitionsUdf", plan))
 
-
     def _diff_success_results(self, result_opt, result_unopt):
         return self._diff_udf_counts(result_opt, result_unopt)
-
 
     def _diff_udf_counts(self, result_opt, result_unopt):
         """Compare stdout and stderr for two successful results."""

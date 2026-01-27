@@ -69,8 +69,8 @@ object UserImplDaskPython {
 
     // Dask uses task graph visualization or compute() for execution
 //    l += s"final_graph = $finalVariableName.explain()"
-     l += s"final_df = $finalVariableName.compute()"
-    l += s"""final_plan = "dummy" """
+//     l += s"final_df = $finalVariableName.compute()"
+    l += s"""$finalVariableName.expr.optimize().pprint()"""
 
     val code = l.mkString("\n")
     SourceCode(src = code, ast = null, preamble = preamble)

@@ -169,15 +169,5 @@
       }
     },
     "returns": "DataFrame"
-  },
-  "persist": {
-    "type": "unary",
-    "parameters": {},
-    "returns": "DataFrame"
-  },
-  "compute": {
-    "type": "unary",
-    "parameters": {},
-    "returns": "pandas.DataFrame"
   }
 }

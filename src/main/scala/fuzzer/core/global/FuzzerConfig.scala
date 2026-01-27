@@ -119,7 +119,7 @@ object FuzzerConfig {
       targetAPI = "dask-python",
       specPath = "specs/dask-python.json",
       exitAfterNSuccesses = true,
-      N = 10,
+      N = 50,
       d = 200,
       p = 5,
       outDir = "./target/dagfuzz-out/dask-python/artifacts",

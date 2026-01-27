@@ -69,22 +69,31 @@ def execute_in_process(code, result_queue, namespace, cov_dir):
             concurrency="multiprocessing",
         )
         cov.start()
+
+    # Capture stdout
+    captured_output = StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = captured_output
+
     try:
         exec(code, namespace, namespace)
-        result_queue.put(
-            {
-                "success": True,
-                "error_name": "",
-                "error_message": "",
-                "plan": namespace["final_plan"]
-            }
-        )
+        result_queue.put({
+            "success": True,
+            "error_name": "",
+            "error_message": "",
+            "stdout": captured_output.getvalue()
+        })
     except Exception as e:
-        # Extract error name in the subprocess
         error_name = type(e).__name__
         error_msg = str(e)
-        result_queue.put({"success": False, "error_name": error_name, "error_message": error_msg})
+        result_queue.put({
+            "success": False,
+            "error_name": error_name,
+            "error_message": error_msg,
+            "stdout": captured_output.getvalue()  # Include stdout even on failure
+        })
     finally:
+        sys.stdout = old_stdout  # Restore stdout
         if cov_dir:
             cov.stop()
             cov.save()
@@ -106,7 +115,7 @@ class GlobalState:
     coverage_merger = None
     coverage_capture_on = True
     coverage_secs_since_last_merge = 0
-    coverage_merge_interval_seconds = 5
+    coverage_merge_interval_seconds = 60
     coverage_timestamp_of_last_merge = datetime.now()
 
 
@@ -378,15 +387,23 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
         print(f"[{datetime.now()}] Executing received code...")
 
         stdout_capture_opt, stderr_capture_opt = self._create_output_captures()
-#         with redirect_stdout(stdout_capture_opt), redirect_stderr(stderr_capture_opt):
-        result_opt, ns_opt = self._try_execute_code_as_is(code, namespace, code_type)
-        result_opt = {**result_opt, "stdout": stdout_capture_opt.getvalue(), "stderr": stderr_capture_opt.getvalue(), 'vars':{**ns_opt}}
+        with redirect_stdout(stdout_capture_opt), redirect_stderr(stderr_capture_opt):
+            result_opt, ns_opt = self._try_execute_code_as_is(code, namespace, code_type)
+        result_opt = {**result_opt,
+#         "stdout": stdout_capture_opt.getvalue(), "stderr": stderr_capture_opt.getvalue(),
+        'vars':{**ns_opt}}
 
         stdout_capture_unopt, stderr_capture_unopt = self._create_output_captures()
-#         with redirect_stdout(stdout_capture_unopt), redirect_stderr(stderr_capture_unopt):
-        result_unopt, ns_unopt = self._try_execute_code_unopt(code, namespace, code_type)
-        result_unopt = {**result_unopt, "stdout": stdout_capture_unopt.getvalue(), "stderr": stderr_capture_unopt.getvalue(), 'vars':{**ns_opt}}
+        with redirect_stdout(stdout_capture_unopt), redirect_stderr(stderr_capture_unopt):
+            result_unopt, ns_unopt = self._try_execute_code_unopt(code, namespace, code_type)
+        result_unopt = {**result_unopt,
+#         "stdout": stdout_capture_unopt.getvalue(), "stderr": stderr_capture_unopt.getvalue(),
+        'vars':{**ns_opt}}
 
+#         print("------ PLAN OPT -----------")
+#         print(result_opt)
+#         print("------ PLAN UNOPT -----------")
+#         print(result_unopt)
         return self._build_execution_result(code, result_opt, result_unopt)
 
     def _try_execute_code_as_is(self, code, namespace, code_type):
@@ -394,23 +411,16 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
         return self._try_exec_code(code, namespace, code_type)
 
     def _try_execute_code_unopt(self, code, namespace, code_type):
-        # Match: final_plan = <something>.explain()
-        pattern = r"final_plan\s*=\s*(.+?)\.explain\(\s*\)"
+        # Match: <something>.expr.optimize().pprint()
+        pattern = r"\.expr\.optimize\(\)\.pprint\(\)"
 
         match = re.search(pattern, code)
         if not match:
             # Nothing to rewrite
             return self._try_exec_code(code, namespace, code_type)
 
-        var_expr = match.group(1)
-
-        replacement = (
-            "opt_flags = pl.QueryOptFlags()\n"
-            "opt_flags.no_optimizations()\n"
-            f"final_plan = {var_expr}.explain(optimizations=opt_flags)"
-        )
-
-        new_code = re.sub(pattern, replacement, code, count=1)
+        # Remove the .optimize() call, keeping .expr.pprint()
+        new_code = re.sub(pattern, ".expr.pprint()", code, count=1)
 
         return self._try_exec_code(new_code, namespace, code_type)
 
@@ -558,7 +568,7 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
             return 0
 
         # Count canonical Python UDF nodes
-        return len(re.findall(r"\.python_udf\s*\(", plan))
+        return len(re.findall(r"mapPartitionsUdf", plan))
 
 
     def _diff_success_results(self, result_opt, result_unopt):
@@ -568,8 +578,8 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
     def _diff_udf_counts(self, result_opt, result_unopt):
         """Compare stdout and stderr for two successful results."""
         # Extract output streams
-        opt_plan = result_opt["plan"]
-        unopt_plan = result_unopt["plan"]
+        opt_plan = result_opt["stdout"]
+        unopt_plan = result_unopt["stdout"]
 
         # Print plans
         print("=== OPTIMIZED PLAN ====")

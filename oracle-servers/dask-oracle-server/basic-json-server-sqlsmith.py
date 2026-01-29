@@ -469,13 +469,13 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
             "    # Execute query",
             f'    query = """{escaped_query}"""',
             "",
-            "    result = fugue_sql(query, tables, engine='dask')",
+            "    result = fugue_sql(query, tables, engine='dask', fsql_ignore_case=True)",
             "",
             "    # Print the optimized query plan",
             "    result.expr.optimize().pprint()",
             "",
-            "if __name__ == '__main__':",
-            "    main()",
+            "",
+            "main()",
         ])
 
         return "\n".join(lines)
@@ -528,8 +528,8 @@ class DaskFuzzingHandler(BaseHTTPRequestHandler):
     def _try_exec_code(self, code, namespace, code_type):
         ns_local = {}
         final_code = code
-        if code_type == "sql":
-            final_code = f"""print(table_env.sql_query(\"\"\"{code}\"\"\").explain())"""
+#         if code_type == "sql":
+#             final_code = f"""print(table_env.sql_query(\"\"\"{code}\"\"\").explain())"""
         return self._try_execute_code(final_code, namespace)
 
     def _try_execute_code(self, code, namespace):

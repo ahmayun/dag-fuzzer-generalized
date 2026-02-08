@@ -116,7 +116,7 @@ class GlobalState:
     coverage_merger = None
     coverage_capture_on = True
     coverage_secs_since_last_merge = 0
-    coverage_merge_interval_seconds = 10
+    coverage_merge_interval_seconds = 60
     coverage_timestamp_of_last_merge = datetime.now()
 
 

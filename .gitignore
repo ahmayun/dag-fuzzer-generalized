@@ -54,3 +54,10 @@ specs/dask-python-old.json
 tmp
 oracle-servers/dask-oracle-server/test-sql-2.py
 oracle-servers/dask-oracle-server/test-sql.py
+.coverage
+minimal-panic.zip
+oracle-servers/dask-oracle-server/test-bug-zion-08-g_19591-a_19591-dag_3918-dfg2.py
+oracle-servers/dask-oracle-server/test-bug-zion-08-g_7854-a_7856-dag_1571-dfg2.py.py
+oracle-servers/polars-oracle-server/test-bug-2.py
+oracle-servers/polars-oracle-server/test-bug-zion-03-g_7854-a_7856-dag_1571-dfg2.py.py
+venv-polars/

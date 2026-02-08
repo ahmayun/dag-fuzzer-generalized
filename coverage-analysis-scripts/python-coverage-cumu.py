@@ -25,42 +25,35 @@ def parse_timestamp_from_filename(filename: str) -> datetime:
 
 def extract_coverage_metrics(cov_file: Path):
     """Extract coverage metrics from a .cov file"""
-    cov = coverage.Coverage(data_file=str(cov_file))
+    cov = coverage.Coverage(data_file=str(cov_file), branch=True)
     cov.load()
     
     # Use coverage's built-in report to get correct totals
-    # This handles everything including files that should be measured but weren't touched
     from io import StringIO
     import sys
-    
+
     # Capture the report output
     old_stdout = sys.stdout
     sys.stdout = report_output = StringIO()
-    
+
     try:
         # Generate text report (this calculates everything correctly)
         total = cov.report(file=sys.stdout, show_missing=False)
     finally:
         sys.stdout = old_stdout
-    
-    # Parse the report output to get detailed metrics
+
+    # Get data object
+    data = cov.get_data()
+    has_arcs = data.has_arcs()
+    num_files = len(data.measured_files())
+
+    # Parse the report output to get statement metrics
     report_text = report_output.getvalue()
-    
-    # The last line has TOTAL stats
     lines = report_text.strip().split('\n')
-    
-    # Initialize metrics
-    has_arcs = cov.get_data().has_arcs()
-    num_files = len(cov.get_data().measured_files())
-    
-    # Parse totals from last line
+
     total_statements = 0
     total_missing = 0
-    total_covered = 0
-    total_branches = 0
-    missing_branches = 0
-    covered_branches = 0
-    
+
     # Find the TOTAL line
     for line in lines:
         if line.startswith('TOTAL'):
@@ -69,45 +62,47 @@ def extract_coverage_metrics(cov_file: Path):
                 # Format: TOTAL  stmts  miss  branch  brpart  cover
                 total_statements = int(parts[1])
                 total_missing = int(parts[2])
-                total_branches = int(parts[3])
-                # brpart is partial branches (counted in missing)
-                # Cover percentage is in parts[5]
             else:
                 # Format: TOTAL  stmts  miss  cover
                 total_statements = int(parts[1])
                 total_missing = int(parts[2])
-                # Cover percentage is in parts[3]
-    
+
     total_covered = total_statements - total_missing
-    
-    # For branch coverage, we need more detail
+
+    # Calculate branch coverage using coverage's internal analysis
+    total_branches = 0
+    missing_branches = 0
+    partial_branches = 0
+
     if has_arcs:
-        # Get branch stats from each file
-        for filename in cov.get_data().measured_files():
+        for filename in data.measured_files():
             try:
-                branch_stats = cov.get_branch_stats(filename)
-                for line_num, (total_exits, taken_exits) in branch_stats.items():
-                    total_branches += total_exits
-                    covered_branches += taken_exits
-                    missing_branches += (total_exits - taken_exits)
+                analysis = cov._analyze(filename)
+                nums = analysis.numbers
+                if hasattr(nums, 'n_branches'):
+                    total_branches += nums.n_branches
+                    missing_branches += nums.n_missing_branches
+                    partial_branches += nums.n_partial_branches
             except:
                 pass
-    
+
+    covered_branches = total_branches - missing_branches - partial_branches if total_branches > 0 else 0
+
     # Calculate percentages
     statements_pct = total if total is not None else 0.0
     branches_pct = (covered_branches * 100.0 / total_branches) if total_branches > 0 else 0.0
-    
+
     metrics = {
         'num_files': num_files,
         'statements_covered': total_covered,
         'statements_total': total_statements,
         'statements_missing': total_missing,
-        'statements_excluded': 0,  # Not easily available from report
+        'statements_excluded': 0,
         'statements_pct': round(statements_pct, 2),
         'branches_covered': covered_branches,
         'branches_total': total_branches,
         'branches_missing': missing_branches,
-        'branches_partial': 0,  # Would need more parsing
+        'branches_partial': partial_branches,
         'branches_pct': round(branches_pct, 2),
         'has_branch_coverage': has_arcs,
     }

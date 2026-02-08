@@ -34,7 +34,7 @@ class PythonCoverageMerger:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_cov = self.consolidated_cov_dir / f"coverage_{timestamp}.cov"
 
-        cov = coverage.Coverage(data_file=str(output_cov))
+        cov = coverage.Coverage(data_file=str(output_cov), branch=True)
 
         # 1. Start from the previous cumulative snapshot (if any)
         prev_cov = self._latest_consolidated()
@@ -67,6 +67,7 @@ def execute_in_process(code, result_queue, namespace, cov_dir):
             data_file=os.path.join(cov_dir, ".coverage"),
             data_suffix=True,
             concurrency="multiprocessing",
+            branch=True,
         )
         cov.start()
 
@@ -115,7 +116,7 @@ class GlobalState:
     coverage_merger = None
     coverage_capture_on = True
     coverage_secs_since_last_merge = 0
-    coverage_merge_interval_seconds = 60
+    coverage_merge_interval_seconds = 10
     coverage_timestamp_of_last_merge = datetime.now()
 
 

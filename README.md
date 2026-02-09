@@ -1,1 +1,68 @@
-# DAG Fuzzer
+# DAGger: DAG-Based Workload Generation for Testing Data-Intensive Computing Frameworks
+
+DAGger is a testing framework for data-intensive computing (DISC) systems such as
+Apache Spark and Flink. It generates executable dataflow programs by constructing
+and progressively refining directed acyclic graphs (DAGs) of operators, enabling
+systematic testing of query optimizers and execution engines beyond SQL-only
+interfaces.
+
+Unlike traditional SQL fuzzers, DAGger operates directly on logical dataflow
+graphs, aligning test generation with the internal representations used by modern
+DISC frameworks.
+
+---
+
+## High-Level Overview
+
+DAGger generates test programs in three stages:
+
+1. **DAG Generation**  
+   Generate a context-free directed acyclic graph that captures only the shape of
+   a dataflow pipeline, without committing to specific operators or parameters.
+
+2. **Abstract Dataflow Graph (ADFG) Construction**  
+   Assign each node in the DAG a concrete operator (e.g., `read`, `filter`, `join`)
+   using a machine-readable API specification, producing an abstract dataflow
+   graph.
+
+3. **State-Aware Parameterization**  
+   Fill in operator parameters (e.g., column names, predicates, join keys) using
+   a propagated schema state, yielding a concrete, executable program.
+
+This staged design separates structural generation, operator selection, and
+semantic validation, making DAGger modular and extensible across frameworks.
+
+---
+
+## Architecture
+
+At a high level, DAGger consists of the following components:
+
+```
+      +--------------------+
+      |  Stage 1           |
+      |  DAG Generation    |
+      |  (Structure Only)  |
+      +----------+---------+
+                 |
+                 v
+      +--------------------+
+      |  Stage 2           |
+      |  Operator          |
+      |  Assignment (ADFG) |
+      +----------+---------+
+                 |
+                 v
+      +--------------------+
+      |  Stage 3           |
+      |  State-Aware       |
+      |  Parameterization  |
+      +----------+---------+
+                 |
+                 v
+      +--------------------+
+      |  Code Generation   |
+      |  & Execution       |
+      +--------------------+
+```
+

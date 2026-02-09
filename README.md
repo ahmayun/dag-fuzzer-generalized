@@ -99,3 +99,24 @@ This separation allows DAGger to remain modular: the core fuzzing logic is
 framework-agnostic, while backend-specific behavior is isolated in adapters and
 framework integration layers.
 
+## Real-World Impact
+
+DAGger has uncovered multiple previously unknown bugs across widely used
+dataflow frameworks. Several of these issues have been confirmed by framework
+developers, demonstrating that DAGger’s generated workloads exercise optimizer
+and execution paths that are difficult to reach with existing testing tools.
+
+### Reported Issues
+
+| Framework | Issue ID | Status |
+|---------|---------|--------|
+| Flink | [FLINK-38397](https://issues.apache.org/jira/browse/FLINK-38397) | Confirmed |
+| Polars | [#25971](https://github.com/pola-rs/polars/issues/25971) | Confirmed |
+| Dask | [#12257](https://github.com/dask/dask/issues/12257) | Confirmed |
+| Polars | [#26322](https://github.com/pola-rs/polars/issues/26322) | Confirmed |
+| Spark | [SPARK-51798](https://issues.apache.org/jira/browse/SPARK-51798) | No response |
+| Spark | [SPARK-54196](https://issues.apache.org/jira/browse/SPARK-54196) | No response |
+| Flink | [FLINK-38366](https://issues.apache.org/jira/browse/FLINK-38366) | No response |
+| Flink | [FLINK-38446](https://issues.apache.org/jira/browse/FLINK-38446) | No response |
+| Flink | [FLINK-38637](https://issues.apache.org/jira/browse/FLINK-38637) | No response |
+

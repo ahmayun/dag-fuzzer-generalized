@@ -114,9 +114,9 @@ and execution paths that are difficult to reach with existing testing tools.
 | Polars | [#25971](https://github.com/pola-rs/polars/issues/25971) | Confirmed |
 | Dask | [#12257](https://github.com/dask/dask/issues/12257) | Confirmed |
 | Polars | [#26322](https://github.com/pola-rs/polars/issues/26322) | Confirmed |
-| Spark | [SPARK-51798](https://issues.apache.org/jira/browse/SPARK-51798) | No response |
-| Spark | [SPARK-54196](https://issues.apache.org/jira/browse/SPARK-54196) | No response |
-| Flink | [FLINK-38366](https://issues.apache.org/jira/browse/FLINK-38366) | No response |
-| Flink | [FLINK-38446](https://issues.apache.org/jira/browse/FLINK-38446) | No response |
-| Flink | [FLINK-38637](https://issues.apache.org/jira/browse/FLINK-38637) | No response |
+| Spark | [SPARK-54196](https://issues.apache.org/jira/browse/SPARK-54196) | Confirmed by system, Pending response |
+| Spark | [SPARK-51798](https://issues.apache.org/jira/browse/SPARK-51798) | Pending response |
+| Flink | [FLINK-38366](https://issues.apache.org/jira/browse/FLINK-38366) | Pending response |
+| Flink | [FLINK-38446](https://issues.apache.org/jira/browse/FLINK-38446) | Pending response |
+| Flink | [FLINK-38637](https://issues.apache.org/jira/browse/FLINK-38637) | Pending response |
 

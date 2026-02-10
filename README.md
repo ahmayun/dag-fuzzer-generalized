@@ -87,12 +87,12 @@ Adding support for a new dataflow framework involves two main steps:
 1. **Environment Integration**  
    Framework-specific execution logic (e.g., job submission, runtime setup,
    result handling) should be added under
-   `src/main/scala/fuzzer/framework`.
+   `src/main/scala/fuzzer/adapters`.
 
 2. **Code Generation**  
    Lowering an abstract dataflow graph (ADFG) to executable code for a target
    framework is handled by adapter modules located in
-   `src/main/scala/fuzzer/adapters`.
+   `src/main/scala/fuzzer/framework`.
    Each subdirectory corresponds to a supported framework and language binding.
 
 This separation allows DAGger to remain modular: the core fuzzing logic is

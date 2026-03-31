@@ -11,6 +11,12 @@ import scala.collection.mutable
 
 object UserImplTFPython {
 
+  private def isStage3Disabled: Boolean =
+    fuzzer.core.global.State.config.exists(_.isStageDisabled(3))
+
+  private def currentStateView(node: Node[DFOperator]): Map[String, TableMetadata] =
+    if (isStage3Disabled) fuzzer.core.global.State.src2TableMap else node.value.stateView
+
   // ============================================================================
   // MAIN ENTRY POINTS
   // ============================================================================
@@ -59,14 +65,10 @@ object UserImplTFPython {
 
     graph.traverseTopological { node =>
       node.value.varName = s"$variablePrefix${node.id}"
-
-      val call = node.getInDegree match {
-        case 0 =>
-          val loadCall = constructDFOCall(spec, node, null, null)
-          loadCall
-        case 1 => constructDFOCall(spec, node, node.parents.head.value.varName, null)
-        case 2 => constructDFOCall(spec, node, node.parents.head.value.varName, node.parents.last.value.varName)
-      }
+      val parentVars = node.parents.map(_.value.varName)
+      val in1 = parentVars.headOption.orNull
+      val in2 = parentVars.lift(1).getOrElse(in1)
+      val call = constructDFOCall(spec, node, in1, in2)
 
       val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
       val line = s"$lhs$call"
@@ -640,7 +642,7 @@ object UserImplTFPython {
   }
 
   def getAllColumns(node: Node[DFOperator], preferUnique: Boolean = true): Seq[(TableMetadata, ColumnMetadata)] = {
-    val tablesColPairs = node.value.stateView.values.toSeq.flatMap { t =>
+    val tablesColPairs = currentStateView(node).values.toSeq.flatMap { t =>
       t.columns.map(c => (t, c))
     }
     tablesColPairs
@@ -704,7 +706,7 @@ object UserImplTFPython {
   def pickMultiColumnsFromReachableSources(
                                             node: Node[DFOperator]
                                           ): Option[((TableMetadata, ColumnMetadata), (TableMetadata, ColumnMetadata))] = {
-    pickTwoColumns(node.value.stateView)
+    pickTwoColumns(currentStateView(node))
   }
 
   // ============================================================================

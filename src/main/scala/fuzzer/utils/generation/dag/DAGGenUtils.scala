@@ -203,4 +203,57 @@ object DAGGenUtils {
 
     graph
   }
+
+  def generateRandomDAGWithArbitraryDegrees[T](
+                                                valueGenerator: Int => T,
+                                                nodeCount: Int = 8,
+                                                edgeProbability: Double = 0.3
+                                              ): Graph[T] = {
+    require(nodeCount >= 2, "Node count must be at least 2")
+    require(edgeProbability >= 0.0 && edgeProbability <= 1.0, "Edge probability must be between 0 and 1")
+
+    val nodesMap = (0 until nodeCount).map { idx =>
+      val id = s"node_$idx"
+      id -> Node(id, valueGenerator(idx))
+    }.toMap
+
+    val childrenMap = mutable.Map(nodesMap.keys.toSeq.map(_ -> mutable.ListBuffer.empty[String]): _*)
+    val parentsMap = mutable.Map(nodesMap.keys.toSeq.map(_ -> mutable.ListBuffer.empty[String]): _*)
+
+    def addEdge(fromId: String, toId: String): Unit = {
+      if (!childrenMap(fromId).contains(toId)) {
+        childrenMap(fromId) += toId
+        parentsMap(toId) += fromId
+      }
+    }
+
+    val orderedIds = (0 until nodeCount).map(idx => s"node_$idx")
+    for {
+      fromIdx <- 0 until (nodeCount - 1)
+      toIdx <- (fromIdx + 1) until nodeCount
+      if Random.nextDouble() < edgeProbability
+    } {
+      addEdge(orderedIds(fromIdx), orderedIds(toIdx))
+    }
+
+    val sinkId = orderedIds.last
+    orderedIds.dropRight(1).foreach { nodeId =>
+      if (childrenMap(nodeId).isEmpty) {
+        addEdge(nodeId, sinkId)
+      }
+    }
+
+    if (parentsMap(sinkId).isEmpty) {
+      addEdge(orderedIds(nodeCount - 2), sinkId)
+    }
+
+    val graph = Graph(
+      nodesMap,
+      childrenMap.view.mapValues(_.toList).toMap,
+      parentsMap.view.mapValues(_.toList).toMap
+    )
+
+    graph.nodes.foreach(_.graph = graph)
+    graph
+  }
 }

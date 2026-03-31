@@ -13,6 +13,8 @@ import play.api.libs.json.JsValue
 
 object MainFuzzer {
 
+  private val ValidDisableStages: Set[Int] = Set(1, 2, 3)
+
   def createEngineFromConfig(config: FuzzerConfig, spec: JsValue, dag2CodeFunc: Graph[DFOperator] => SourceCode): FuzzerEngine = {
 
     val (dataAdapter, codeGenerator, codeExecutor) = AdapterFactory.createComponents(config, dag2CodeFunc)
@@ -65,6 +67,9 @@ object MainFuzzer {
             case "--refresh-udfs-after" => config.copy(refreshUdfsAfter = value.toInt)
             case "--no-coverage-capture" => config.copy(coverageCaptureOn = false)
             case "--coverage-capture" => config.copy(coverageCaptureOn = true)
+            case "--disable-stage" =>
+              val stage = value.toInt
+              config.copy(disabledStages = config.disabledStages + stage)
             case unknown => throw new IllegalArgumentException(s"Unknown argument: $unknown")
           }
           parseRec(tail, updated)
@@ -84,6 +89,19 @@ object MainFuzzer {
     }
   }
 
+  private def validateConfig(config: FuzzerConfig): FuzzerConfig = {
+    val invalidStages = config.disabledStages.diff(ValidDisableStages)
+    if (invalidStages.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Invalid stage number(s): ${invalidStages.toSeq.sorted.mkString(", ")}. Supported stages are 1, 2, and 3."
+      )
+    }
+    if (config.isStageDisabled(1) && !config.isStageDisabled(2)) {
+      throw new IllegalArgumentException("--disable-stage 1 requires --disable-stage 2.")
+    }
+    config
+  }
+
   def main(args: Array[String]): Unit = {
 
     if (args.isEmpty) {
@@ -100,7 +118,7 @@ object MainFuzzer {
       case _ => throw new IllegalArgumentException(s"Unknown domain: $domain. Expected: spark-scala, flink-python, or dask-python")
     }
 
-    val config = parseArgs(args.tail, baseConfig)
+    val config = validateConfig(parseArgs(args.tail, baseConfig))
 
     val spec = JsonReader.readJsonFile(config.specPath)
 

@@ -11,6 +11,12 @@ import scala.collection.mutable
 
 object UserImplFlinkPython {
 
+  private def isStage3Disabled: Boolean =
+    fuzzer.core.global.State.config.exists(_.isStageDisabled(3))
+
+  private def currentStateView(node: Node[DFOperator]): Map[String, TableMetadata] =
+    if (isStage3Disabled) fuzzer.core.global.State.src2TableMap else node.value.stateView
+
   def constructDFOCall(spec: JsValue, node: Node[DFOperator], in1: String, in2: String): String = {
     val opName = node.value.name
     val opSpec = spec \ opName
@@ -102,7 +108,7 @@ object UserImplFlinkPython {
   }
 
   def getAllColumns(node: Node[DFOperator], preferUnique: Boolean = true): Seq[(TableMetadata, ColumnMetadata)] = {
-    val tablesColPairs = node.value.stateView.values.toSeq.flatMap { t =>
+    val tablesColPairs = currentStateView(node).values.toSeq.flatMap { t =>
       t.columns.map(c => (t, c))
     }
     tablesColPairs
@@ -270,7 +276,7 @@ object UserImplFlinkPython {
   }
 
   def pickMultiColumnsFromReachableSources(node: Node[DFOperator]): Option[((TableMetadata, ColumnMetadata), (TableMetadata, ColumnMetadata))] = {
-    pickTwoColumns(node.value.stateView)
+    pickTwoColumns(currentStateView(node))
   }
 
   def generateCrossTableExpression(
@@ -737,16 +743,17 @@ object UserImplFlinkPython {
     graph.traverseTopological { node =>
       node.value.varName = s"$variablePrefix${node.id}"
       val svBefore = s"${node.value.stateView}"
-
-      val call = node.getInDegree match {
-        case 0 =>
-          val loadCall = constructDFOCall(spec, node, null, null)
-          val aliasing = s""".select(*[col(column_name).alias(f"{column_name}_${node.id}") for column_name in $loadCall.get_schema().get_field_names()])"""
-
-          s"$loadCall$aliasing"
-        case 1 => constructDFOCall(spec, node, node.parents.head.value.varName, null)
-        case 2 => constructDFOCall(spec, node, node.parents.head.value.varName, node.parents.last.value.varName)
-      }
+      val parentVars = node.parents.map(_.value.varName)
+      val in1 = parentVars.headOption.orNull
+      val in2 = parentVars.lift(1).getOrElse(in1)
+      val rawCall = constructDFOCall(spec, node, in1, in2)
+      val call =
+        if ((spec \ node.value.name \ "type").asOpt[String].contains("source")) {
+          val aliasing = s""".select(*[col(column_name).alias(f"{column_name}_${node.id}") for column_name in $rawCall.get_schema().get_field_names()])"""
+          s"$rawCall$aliasing"
+        } else {
+          rawCall
+        }
       val lhs = if (node.isSink) s"$finalVariableName = " else s"${node.value.varName} = "
 
 //      val svAfter = s"${node.value.stateView}"

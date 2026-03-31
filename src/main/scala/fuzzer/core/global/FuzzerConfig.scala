@@ -31,7 +31,10 @@ case class FuzzerConfig(
                          numUdfsPerLLMCall: Int,
                          refreshUdfsAfter: Int,
                          coverageCaptureOn: Boolean,
-                       )
+                         disabledStages: Set[Int] = Set.empty,
+                       ) {
+  def isStageDisabled(stage: Int): Boolean = disabledStages.contains(stage)
+}
 
 object FuzzerConfig {
 
@@ -75,6 +78,7 @@ object FuzzerConfig {
       numUdfsPerLLMCall = 10,
       refreshUdfsAfter = 10000,
       coverageCaptureOn = true,
+      disabledStages = Set.empty,
     )
   }
 
@@ -110,6 +114,7 @@ object FuzzerConfig {
       numUdfsPerLLMCall = 10,
       refreshUdfsAfter = 10000,
       coverageCaptureOn = true,
+      disabledStages = Set.empty,
     )
   }
 
@@ -145,6 +150,7 @@ object FuzzerConfig {
       numUdfsPerLLMCall = 10,
       refreshUdfsAfter = 10000,
       coverageCaptureOn = true,
+      disabledStages = Set.empty,
     )
   }
 
@@ -180,6 +186,7 @@ object FuzzerConfig {
       numUdfsPerLLMCall = 10,
       refreshUdfsAfter = 10000,
       coverageCaptureOn = true,
+      disabledStages = Set.empty,
     )
   }
 
@@ -215,6 +222,7 @@ object FuzzerConfig {
       numUdfsPerLLMCall = 10,
       refreshUdfsAfter = 50,
       coverageCaptureOn = true,
+      disabledStages = Set.empty,
     )
   }
 }

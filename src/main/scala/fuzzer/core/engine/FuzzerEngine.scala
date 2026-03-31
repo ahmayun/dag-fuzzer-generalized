@@ -6,7 +6,7 @@ import fuzzer.core.global.FuzzerConfig
 import fuzzer.core.graph.{DAGParser, DFOperator, Graph, Node}
 import fuzzer.core.interfaces.{CodeExecutor, CodeGenerator, DataAdapter, ExecutionResult}
 import fuzzer.data.tables.TableMetadata
-import fuzzer.utils.generation.dag.DAGGenUtils.generateRandomInvertedBinaryTreeDAG
+import fuzzer.utils.generation.dag.DAGGenUtils.{generateRandomDAGWithArbitraryDegrees, generateRandomInvertedBinaryTreeDAG}
 import fuzzer.utils.io.ReadWriteUtils
 import fuzzer.utils.io.ReadWriteUtils.{prettyPrintStats, writeLiveStats}
 import fuzzer.utils.random.Random
@@ -56,6 +56,15 @@ class FuzzerEngine(
     }
   }
 
+  def pickRandomOperatorIgnoringArity(opMap: Map[String, Seq[String]], node: Node[DFOperator]): Option[String] = {
+    if (node.getInDegree == 0) {
+      pickRandomSource(opMap)
+    } else {
+      val allOps = opMap.values.flatten.toSeq
+      if (allOps.isEmpty) None else Some(allOps(Random.nextInt(allOps.size)))
+    }
+  }
+
   def buildOpMap(spec: JsValue): Map[String, Seq[String]] = {
     spec.as[JsObject].fields.foldLeft(Map.empty[String, Seq[String]]) {
       case (acc, (name, definition)) =>
@@ -69,14 +78,19 @@ class FuzzerEngine(
 
   private def fillOperators(graph: Graph[DFOperator], spec: JsValue): Graph[DFOperator] = {
     val opMap = buildOpMap(spec)
+    val stage2Disabled = config.isStageDisabled(2)
 
     graph.transformNodes { node =>
-      val opOpt = (node.getInDegree, node.getOutDegree) match {
-        //        case (_,0) => pickRandomAction(opMap) // Better to delegate action choice to DFG2Source converter
-        case (0,_) => pickRandomSource(opMap)
-        case (1,_) => pickRandomUnaryOp(opMap, node)
-        case (2,_) => pickRandomBinaryOp(opMap)
-        case (in, _) => throw new ImpossibleDFGException(s"Impossible DFG provided, a node has in-degree=$in")
+      val opOpt = if (stage2Disabled) {
+        pickRandomOperatorIgnoringArity(opMap, node)
+      } else {
+        (node.getInDegree, node.getOutDegree) match {
+          //        case (_,0) => pickRandomAction(opMap) // Better to delegate action choice to DFG2Source converter
+          case (0,_) => pickRandomSource(opMap)
+          case (1,_) => pickRandomUnaryOp(opMap, node)
+          case (2,_) => pickRandomBinaryOp(opMap)
+          case (in, _) => throw new ImpossibleDFGException(s"Impossible DFG provided, a node has in-degree=$in")
+        }
       }
       assert(opOpt.isDefined, s"Couldn't find an operator in the provided spec that fits the node: $node")
       val Some(op) = opOpt
@@ -150,10 +164,30 @@ class FuzzerEngine(
     }
   }
 
+  private def createAblationDAGIterator(config: FuzzerConfig): Iterator[(Graph[DFOperator], String)] = {
+    new Iterator[(Graph[DFOperator], String)] {
+      var counter: Int = -1
+      override def hasNext: Boolean = true
+
+      override def next(): (Graph[DFOperator], String) = {
+        counter += 1
+        val nodeCount = Random.nextIntInclusiveRange(4, 14)
+        (
+          generateRandomDAGWithArbitraryDegrees(
+            valueGenerator = DFOperator.fromInt,
+            nodeCount = nodeCount,
+            edgeProbability = 0.35
+          ),
+          s"random_dag_$counter"
+        )
+      }
+    }
+  }
+
   private def createDAGGenerator(config: FuzzerConfig): Iterator[(Graph[DFOperator], String)] = {
     // Uncomment this to use external dag generator
     // generateYamlFilesInfinite(config.d)
-    createDAGIteratorInternal(config)
+    if (config.isStageDisabled(1)) createAblationDAGIterator(config) else createDAGIteratorInternal(config)
   }
 
   def run(): FuzzerResults = {
@@ -448,7 +482,7 @@ class FuzzerEngine(
 
   def isInvalidDFG(dag: Graph[DFOperator]): (Boolean, String) = {
     dag match {
-      case _ if dag.nodes.exists(_.getInDegree > 2) =>
+      case _ if !config.isStageDisabled(2) && dag.nodes.exists(_.getInDegree > 2) =>
         (true, "Has a node with in-degree > 2.")
       case _ if dag.getSinkNodes.length > 1 =>
         (true, "DAG has more than one sink.")

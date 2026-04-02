@@ -13,7 +13,7 @@ libraryDependencies ++= Seq(
   "org.yaml" % "snakeyaml" % "2.2",
   "org.scala-lang" % "scala-compiler" % scalaVersion.value,
   "net.bytebuddy" % "byte-buddy" % "1.14.11",
-  "org.apache.spark" %% "spark-sql" % "3.5.0" % "provided"
+  "org.apache.spark" %% "spark-sql" % "3.5.0" // % "provided"
 )
 
 dependencyOverrides += "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2"

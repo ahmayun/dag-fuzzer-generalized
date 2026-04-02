@@ -61,3 +61,10 @@ oracle-servers/dask-oracle-server/test-bug-zion-08-g_7854-a_7856-dag_1571-dfg2.p
 oracle-servers/polars-oracle-server/test-bug-2.py
 oracle-servers/polars-oracle-server/test-bug-zion-03-g_7854-a_7856-dag_1571-dfg2.py.py
 venv-polars/
+.cursor/
+.vscode/
+dagger.pdf
+final-bug-dataset.zip
+final-bug-dataset/
+internal-log/
+saved-dask-mods/

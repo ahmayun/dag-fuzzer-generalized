@@ -19,7 +19,8 @@ object UserImplDaskPython {
     fuzzer.core.global.State.config.exists(_.isStageDisabled(3))
 
   private def currentStateView(node: Node[DFOperator]): Map[String, TableMetadata] =
-    if (isStage3Disabled) fuzzer.core.global.State.src2TableMap else node.value.stateView
+    if (isStage3Disabled) fuzzer.core.global.State.aliasedSrc2TableMap
+    else node.value.stateView
 
   // ============================================================================
   // MAIN ENTRY POINTS

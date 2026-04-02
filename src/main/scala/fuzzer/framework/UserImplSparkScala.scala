@@ -14,8 +14,10 @@ object UserImplSparkScala {
   private def isStage3Disabled: Boolean =
     fuzzer.core.global.State.config.exists(_.isStageDisabled(3))
 
+  /** Stage 3 on: reachability-aware [[node.value.stateView]]. Stage 3 off: aliased metadata for **sources only** (not current node's view). */
   private def currentStateView(node: Node[DFOperator]): Map[String, TableMetadata] =
-    if (isStage3Disabled) fuzzer.core.global.State.src2TableMap else node.value.stateView
+    if (isStage3Disabled) fuzzer.core.global.State.aliasedSrc2TableMap
+    else node.value.stateView
 
   def generateStringFilterUDF(): String = {
     val stringFilters = List("val filterUdfString = udf((arg: String) => arg.length > 5).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.startsWith(\"A\") || arg.startsWith(\"a\")).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.toLowerCase.contains(\"test\")).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.forall(_.isLetter) && arg.length < 10).asNondeterministic()", "val filterUdfString = udf((arg: String) => arg.count(_ == 'e') >= 2).asNondeterministic()")
@@ -681,12 +683,7 @@ object UserImplSparkScala {
       val lhs = if(node.isSink) s"val $finalVariableName = " else s"val ${node.value.varName} = "
       l += s"$lhs$call"
     }
-//    l += s"$finalVariableName.explain(true)"
-    l += s"$finalVariableName.collect()"
-    l += "spark.catalog.clearCache()"
-    l += "spark.sharedState.cacheManager.clearCache()"
-//    l += s"System.gc()"
-//    l += s"Thread.sleep(5000)"
+   l += s"$finalVariableName.explain(true)"
 
     SourceCode(src=l.mkString("\n"), ast=null, preamble=generatePreamble())
   }

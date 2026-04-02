@@ -127,6 +127,11 @@ class FuzzerEngine(
         node.id -> table
     }.toMap
 
+    fuzzer.core.global.State.aliasedSrc2TableMap = preprocessed.map {
+      case (node, table) =>
+        node.id -> table
+    }.toMap
+
     initializeStateViews(dfg)
     dfg
   }

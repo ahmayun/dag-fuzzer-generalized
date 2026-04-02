@@ -168,17 +168,20 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 
   def compareRuns(optDF: DataFrame, unOptDF: DataFrame): Throwable = {
     val udfCompare = oracleUDFDuplication(optDF, unOptDF)   // assumed: Try[String]
-    val dfCompare  = oracleDFComparison(optDF, unOptDF)     // Try[String]
 
-    dfCompare match {
-      case _: Success =>
-        udfCompare match {
-          case ex: MismatchException => ex
-          case _: Success => new Success("Both Plans and Final DFs match")
-        }
-      case ex: MismatchException => ex
+    // UNCOMMENT THIS TO COMPARE FINAL DFs
+    // val dfCompare  = oracleDFComparison(optDF, unOptDF)     // Try[String]
 
-    }
+    // dfCompare match {
+    //   case _: Success =>
+    //     udfCompare match {
+    //       case ex: MismatchException => ex
+    //       case _: Success => new Success("Both Plans and Final DFs match")
+    //     }
+    //   case ex: MismatchException => ex
+
+    // }
+    udfCompare
   }
 
   def checkOneGo(source: SourceCode): (Throwable, (Throwable, String), (Throwable, String)) = {
@@ -245,9 +248,9 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
   var session: Option[SparkSession] = None
   override def execute(code: SourceCode): ExecutionResult = {
 
-    setupEnvironment()
-    val session = fuzzer.core.global.State.sparkOption.get
-    TPCDSTablesLoader.loadAll(session, config.localTpcdsPath, dbName = "tpcds", _ => true)
+    // setupEnvironment()
+    // val session = fuzzer.core.global.State.sparkOption.get
+    // TPCDSTablesLoader.loadAll(session, config.localTpcdsPath, dbName = "tpcds", _ => true)
 
     val ret = try {
       val (result, (optResult, fullSourceOpt), (unOptResult, fullSourceUnOpt)) = checkOneGo(code)
@@ -270,9 +273,9 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
 //        throw new DAGFuzzerException("SparkCodeGenerator.execute() failed!", ex)
     }
 
-    session.sqlContext.clearCache()
-    session.catalog.clearCache()
-    session.close()
+    // session.sqlContext.clearCache()
+    // session.catalog.clearCache()
+    // session.close()
 
     ret
   }
@@ -290,7 +293,7 @@ class SparkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     session = Some(sparkSession)
     fuzzer.core.global.State.sparkOption = session
 
-    () => sparkSession.stop()
+    () => () //sparkSession.stop()
   }
 
   override def tearDownEnvironment(terminateF: () => Unit): Unit = {

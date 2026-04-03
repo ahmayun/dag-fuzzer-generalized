@@ -743,7 +743,7 @@ object UserImplFlinkPython {
 
     graph.traverseTopological { node =>
       node.value.varName = s"$variablePrefix${node.id}"
-      val svBefore = s"${node.value.stateView}"
+      val svBefore = s"${currentStateView(node)}"
       val parentVars = node.parents.map(_.value.varName)
       val in1 = parentVars.headOption.orNull
       val in2 = parentVars.lift(1).getOrElse(in1)

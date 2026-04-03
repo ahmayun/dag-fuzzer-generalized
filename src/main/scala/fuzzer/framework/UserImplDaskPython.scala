@@ -673,13 +673,13 @@ Each function should be:
     val finalList = tablesColPairs // if(numericOnly.nonEmpty) numericOnly else tablesColPairs
 
 
-    assert(finalList.nonEmpty, s"Expected columnNames to be non-empty: stateViewMap = ${node.value.stateView}")
+    assert(finalList.nonEmpty, s"Expected columnNames to be non-empty: columnMap = ${currentStateView(node)}")
     val pick = finalList(Random.nextInt(finalList.length))
     pick
   }
 
   def pickRandomColumnFromNode(node: Node[DFOperator]): (TableMetadata, ColumnMetadata) = {
-    val tablesColPairs = node.value.stateView.values.toSeq.flatMap { t =>
+    val tablesColPairs = currentStateView(node).values.toSeq.flatMap { t =>
       t.columns.map(c => (t, c))
     }
     assert(tablesColPairs.nonEmpty, "Expected columns to be non-empty")

@@ -391,8 +391,8 @@ Each function should be:
     val how = joinTypes(Random.nextInt(joinTypes.length))
 
     // Try to find columns with matching names
-    val leftCols = node.parents.head.value.stateView.values.flatMap(_.columns.map(_.name)).toSet
-    val rightCols = node.parents.last.value.stateView.values.flatMap(_.columns.map(_.name)).toSet
+    val leftCols = currentStateView(node.parents.head).values.flatMap(_.columns.map(_.name)).toSet
+    val rightCols = currentStateView(node.parents.last).values.flatMap(_.columns.map(_.name)).toSet
     val commonCols = leftCols.intersect(rightCols)
 
     if (commonCols.nonEmpty) {
@@ -580,13 +580,13 @@ Each function should be:
           case Some(i) => fuzzer.core.global.State.iteration.toString != i
         }
     }
-    assert(tablesColPairs.nonEmpty, s"Expected columnNames to be non-empty: stateViewMap = ${node.value.stateView}")
+    assert(tablesColPairs.nonEmpty, s"Expected columnNames to be non-empty: columnMap = ${currentStateView(node)}")
     val pick = tablesColPairs(Random.nextInt(tablesColPairs.length))
     pick
   }
 
   def pickRandomColumnFromNode(node: Node[DFOperator]): (TableMetadata, ColumnMetadata) = {
-    val tablesColPairs = node.value.stateView.values.toSeq.flatMap { t =>
+    val tablesColPairs = currentStateView(node).values.toSeq.flatMap { t =>
       t.columns.map(c => (t, c))
     }
     assert(tablesColPairs.nonEmpty, "Expected columns to be non-empty")

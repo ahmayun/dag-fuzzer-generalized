@@ -660,7 +660,7 @@ object UserImplTFPython {
           case Some(i) => fuzzer.core.global.State.iteration.toString != i
         }
     }
-    assert(tablesColPairs.nonEmpty, s"Expected columnNames to be non-empty: stateViewMap = ${node.value.stateView}")
+    assert(tablesColPairs.nonEmpty, s"Expected columnNames to be non-empty: columnMap = ${currentStateView(node)}")
     val pick = tablesColPairs(Random.nextInt(tablesColPairs.length))
     pick
   }

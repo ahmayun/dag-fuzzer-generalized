@@ -14,7 +14,7 @@ load_dotenv()
 
 
 class RandomFunctionGenerator:
-    def __init__(self, claude_model: str = "claude-3-7-sonnet-20250219"):
+    def __init__(self, claude_model: str = "claude-haiku-4-5"):
         self.claude_model = claude_model
 
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -76,7 +76,7 @@ Each function should be:
     parser.add_argument(
         "--claude-model",
         type=str,
-        default="claude-3-7-sonnet-20250219"
+        default="claude-haiku-4-5"
     )
 
     args = parser.parse_args()

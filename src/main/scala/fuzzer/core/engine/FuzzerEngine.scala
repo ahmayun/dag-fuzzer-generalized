@@ -153,7 +153,7 @@ class FuzzerEngine(
     generatedSource
   }
 
-  private def createDAGIteratorInternal(config: FuzzerConfig): Iterator[(Graph[DFOperator], String)] = {
+  private def createDAGIteratorInternal(config: FuzzerConfig, enable_constraints: Boolean=true): Iterator[(Graph[DFOperator], String)] = {
     new Iterator[(Graph[DFOperator], String)] {
       var counter: Int = -1
       override def hasNext: Boolean = true
@@ -176,12 +176,10 @@ class FuzzerEngine(
 
       override def next(): (Graph[DFOperator], String) = {
         counter += 1
-        val nodeCount = Random.nextIntInclusiveRange(4, 14)
         (
           generateRandomDAGWithArbitraryDegrees(
             valueGenerator = DFOperator.fromInt,
-            nodeCount = nodeCount,
-            edgeProbability = 0.35
+            maxDepth = Random.nextIntInclusiveRange(3, 7)
           ),
           s"random_dag_$counter"
         )

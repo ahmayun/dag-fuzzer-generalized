@@ -205,55 +205,90 @@ object DAGGenUtils {
   }
 
   def generateRandomDAGWithArbitraryDegrees[T](
-                                                valueGenerator: Int => T,
-                                                nodeCount: Int = 8,
-                                                edgeProbability: Double = 0.3
-                                              ): Graph[T] = {
-    require(nodeCount >= 2, "Node count must be at least 2")
-    require(edgeProbability >= 0.0 && edgeProbability <= 1.0, "Edge probability must be between 0 and 1")
+                                              valueGenerator: Int => T,
+                                              maxDepth: Int = 6,
+                                              splittingProbability: Double = 1.0,
+                                              twoChildProbability: Double = 0.3
+                                            ): Graph[T] = {
+    require(splittingProbability >= 0.0 && splittingProbability <= 1.0, "Splitting probability must be between 0 and 1")
+    require(twoChildProbability >= 0.0 && twoChildProbability <= 1.0, "Two child probability must be between 0 and 1")
+    require(maxDepth >= 1, "Max depth must be at least 1")
 
-    val nodesMap = (0 until nodeCount).map { idx =>
-      val id = s"node_$idx"
-      id -> Node(id, valueGenerator(idx))
-    }.toMap
+    val nodesMap = mutable.Map[String, Node[T]]()
+    val childrenMap = mutable.Map[String, mutable.ListBuffer[String]]()
+    val parentsMap = mutable.Map[String, mutable.ListBuffer[String]]()
 
-    val childrenMap = mutable.Map(nodesMap.keys.toSeq.map(_ -> mutable.ListBuffer.empty[String]): _*)
-    val parentsMap = mutable.Map(nodesMap.keys.toSeq.map(_ -> mutable.ListBuffer.empty[String]): _*)
+    var nodeCounter = 0
 
-    def addEdge(fromId: String, toId: String): Unit = {
-      if (!childrenMap(fromId).contains(toId)) {
-        childrenMap(fromId) += toId
-        parentsMap(toId) += fromId
+    def createNode(level: Int): Node[T] = {
+      val id = s"node_$nodeCounter"
+      nodeCounter += 1
+      val node = Node(id, valueGenerator(level))
+      nodesMap(id) = node
+      childrenMap(id) = mutable.ListBuffer.empty
+      parentsMap(id) = mutable.ListBuffer.empty
+      node
+    }
+
+    def addForwardEdge(parent: Node[T], child: Node[T]): Unit = {
+      childrenMap(parent.id) += child.id
+      parentsMap(child.id) += parent.id
+    }
+
+    // Create root node
+    val root = createNode(0)
+    val nodesToProcess = mutable.Queue[(Node[T], Int)]()
+    nodesToProcess.enqueue((root, 0))
+
+    // Build regular binary tree by splitting nodes
+    while (nodesToProcess.nonEmpty) {
+      val (currentNode, depth) = nodesToProcess.dequeue()
+
+      // Decide if this node should split (have children)
+      if (depth < maxDepth && Random.nextDouble() < splittingProbability) {
+        // Decide number of children (1 or 2)
+        val numChildren = Random.nextIntInclusiveRange(1, 10) /*arbitrary number of children, just to prevent exploded DAGs*/
+
+        // Create children
+        for (_ <- 0 until numChildren) {
+          val child = createNode(depth + 1)
+          addForwardEdge(currentNode, child)
+          nodesToProcess.enqueue((child, depth + 1))
+        }
       }
     }
 
-    val orderedIds = (0 until nodeCount).map(idx => s"node_$idx")
-    for {
-      fromIdx <- 0 until (nodeCount - 1)
-      toIdx <- (fromIdx + 1) until nodeCount
-      if Random.nextDouble() < edgeProbability
-    } {
-      addEdge(orderedIds(fromIdx), orderedIds(toIdx))
+    // Now reverse all edges to create inverted tree
+    val finalChildrenMap = mutable.Map[String, List[String]]()
+    val finalParentsMap = mutable.Map[String, List[String]]()
+
+    // Initialize all nodes with empty lists
+    nodesMap.keys.foreach { nodeId =>
+      finalChildrenMap(nodeId) = List.empty
+      finalParentsMap(nodeId) = List.empty
     }
 
-    val sinkId = orderedIds.last
-    orderedIds.dropRight(1).foreach { nodeId =>
-      if (childrenMap(nodeId).isEmpty) {
-        addEdge(nodeId, sinkId)
+    // Reverse the edges: parent->child becomes child->parent
+    for ((parentId, children) <- childrenMap) {
+      for (childId <- children) {
+        // Original: parent -> child
+        // Reversed: child -> parent (child becomes parent, parent becomes child)
+        finalChildrenMap(childId) = finalChildrenMap(childId) :+ parentId
+        finalParentsMap(parentId) = finalParentsMap(parentId) :+ childId
       }
     }
 
-    if (parentsMap(sinkId).isEmpty) {
-      addEdge(orderedIds(nodeCount - 2), sinkId)
-    }
+    // Convert to immutable maps
+    val finalNodesMap = nodesMap.toMap
+    val finalChildrenMapImmutable = finalChildrenMap.toMap
+    val finalParentsMapImmutable = finalParentsMap.toMap
 
-    val graph = Graph(
-      nodesMap,
-      childrenMap.view.mapValues(_.toList).toMap,
-      parentsMap.view.mapValues(_.toList).toMap
-    )
+    // Create the graph
+    val graph = Graph(finalNodesMap, finalChildrenMapImmutable, finalParentsMapImmutable)
 
+    // Set the graph reference for all nodes
     graph.nodes.foreach(_.graph = graph)
+
     graph
   }
 }

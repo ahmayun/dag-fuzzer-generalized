@@ -179,7 +179,7 @@ class FuzzerEngine(
         (
           generateRandomDAGWithArbitraryDegrees(
             valueGenerator = DFOperator.fromInt,
-            maxDepth = Random.nextIntInclusiveRange(3, 7)
+            maxDepth = Random.nextIntInclusiveRange(3, 4)
           ),
           s"random_dag_$counter"
         )

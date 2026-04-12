@@ -16,7 +16,7 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.net.URI
 import java.time.Duration
 import java.net.{ConnectException, Socket}
-import scala.sys.process._
+import java.util.concurrent.TimeUnit
 import scala.util.{Failure, Success, Try}
 
 
@@ -135,6 +135,8 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
   val client: HttpClient = HttpClient.newBuilder()
     .connectTimeout(Duration.ofSeconds(120))
     .build()
+
+  val exitTimeoutSeconds = 5
 
   private def parseResponse(responseBody: String): Option[JsValue] = {
     if (responseBody.nonEmpty) {
@@ -292,17 +294,23 @@ class FlinkCodeExecutor(config: FuzzerConfig, spec: JsValue) extends CodeExecuto
     val currentJavaOpts = sys.env.getOrElse("JAVA_TOOL_OPTIONS", "")
     val newJavaOpts = if (currentJavaOpts.isEmpty) jacocoAgent else s"$currentJavaOpts $jacocoAgent"
 
-    val processBuilder = Process(
-      "oracle-servers/venv/bin/python oracle-servers/pyflink-oracle-server/basic-json-server.py",
-      None,
-      "JAVA_TOOL_OPTIONS" -> newJavaOpts
-    ) #> new File("oracle-servers/.logs/pyflink-server.log")
+    val processBuilder = new java.lang.ProcessBuilder(
+      "oracle-servers/venv/bin/python",
+      "oracle-servers/pyflink-oracle-server/basic-json-server-isolated.py"
+    )
+    processBuilder.environment().put("JAVA_TOOL_OPTIONS", newJavaOpts)
+    processBuilder.redirectOutput(new File("oracle-servers/.logs/pyflink-server.log"))
+    processBuilder.redirectErrorStream(true)
 
-    val process = processBuilder.run()
+    val process = processBuilder.start()
     Thread.sleep(500)
 
     () => {
       process.destroy()
+      if (!process.waitFor(this.exitTimeoutSeconds, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        process.waitFor(this.exitTimeoutSeconds, TimeUnit.SECONDS)
+      }
     }
   }
 

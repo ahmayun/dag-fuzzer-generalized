@@ -69,3 +69,4 @@ final-bug-dataset/
 internal-log/
 saved-dask-mods/
 __pycache__/
+sqlancer/
